@@ -1,18 +1,8 @@
 # Generative AI Scientist -- Complete Interview Roadmap
 
-> **Target Role**: AI / Research / Applied Scientist (GenAI / LLM focus)
-> **Approach**: Depth-first, theory-heavy, minimal code -- learn like a researcher, not just a practitioner
-> **How to use**: Study topics in order. Ask me to generate detailed notes for each topic one by one.
-
----
-
-### Formatting Guidelines (for Claude -- follow these when generating notes)
-
-- **Equations**: Use LaTeX. Block equations with `$$...$$`, inline math with `$...$`. Notion renders these natively.
-- **Diagrams**: Use Mermaid diagrams inside ```mermaid code blocks for architecture flows, pipelines, and visual explanations. Notion renders these.
-- **Code**: Minimal. Only include code when it explains a concept better than words. This is a theory-focused resource, not a cookbook.
-- **ASCII art**: Use for attention matrices, mask patterns, and comparison layouts where Mermaid isn't suitable.
-- **Structure**: Every topic file must include a Table of Contents, and end with an "Interview Questions & Answers" section.
+> **Target Audience**: Students, Professionals, and aspiring AI / Research Scientists
+> **Approach**: Depth-first, theory-heavy, minimal code -- learn the underlying mechanics like a researcher to build a rock-solid foundation.
+> **How to use**: Study topics sequentially. Use this roadmap as a comprehensive guide to mastering Generative AI concepts and preparing for advanced technical interviews.
 
 ---
 
