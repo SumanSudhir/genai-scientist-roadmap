@@ -2,11 +2,10 @@
 
 > **Target Audience**: Students, Professionals, and aspiring AI / Research Scientists
 > **Approach**: Depth-first, theory-heavy, minimal code -- learn the underlying mechanics like a researcher to build a rock-solid foundation.
-> **How to use**: Study topics sequentially. Use this roadmap as a comprehensive guide to mastering Generative AI concepts and preparing for advanced technical interviews.
 
----
+## Suggested Study Order & File Map
 
-## How This Roadmap Is Organized
+Study topics sequentially using this map as a comprehensive guide to mastering Generative AI concepts.
 
 ```
 Phase A: Foundations (Topics 1-4)         -- The bedrock. Skip at your peril.
