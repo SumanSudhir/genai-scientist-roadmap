@@ -892,19 +892,5 @@ For someone with ML/DL background (adjust if starting fresh):
 
 ---
 
-## How to Use This With Me
-
-1. Say: **"Generate notes for Topic X"** (e.g., "Generate notes for Topic 8: Attention Mechanisms")
-2. I'll create comprehensive, interview-ready notes with:
-   - Deep conceptual explanations (the "why" behind everything)
-   - Mathematical formulations where they add clarity
-   - Intuitive analogies for complex concepts
-   - Diagrams in ASCII/text format
-   - Interview Q&A at the end of each topic
-   - Minimal code -- only when it clarifies a concept better than words
-3. For existing files (Topics 5-8, 15), I'll expand and improve them
-4. Study one topic per day for maximum retention
-
----
 
 *Created: February 2026 | Target: AI Scientist (GenAI/LLM focus)*
