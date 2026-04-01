@@ -843,9 +843,9 @@ When you ask me to generate notes for a topic, I'll create/update the correspond
 | 1. Probability, Statistics & Info Theory | `01_Probability_Statistics.md` | Done |
 | 2. Linear Algebra & Optimization | `02_Linear_Algebra_Optimization.md` | Done |
 | 3. Classical Machine Learning | `03_Classical_ML.md` | Done |
-| 4. Deep Learning Foundations | `04_Deep_Learning_Foundations.md` | Pending |
+| 4. Deep Learning Foundations | `04_Deep_Learning_Foundations.md` | Done |
 | 5. Tokenization | `05_Tokenization.md` | Done |
-| 6. Text Preprocessing & Embeddings | `06_Text_Preprocessing_Embeddings.md` | Pending |
+| 6. Text Preprocessing & Embeddings | `06_Text_Preprocessing_Embeddings.md` | Done |
 | 7. Sequence Modeling | `07_Sequence_Modeling.md` | Pending |
 | 8. Attention Mechanisms | `08_Attention_Mechanisms.md` | Done |
 | 9. Transformer Architecture | `09_Transformer_Architecture.md` | Done |
