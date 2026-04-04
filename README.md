@@ -1,22 +1,22 @@
 # Generative AI Scientist -- Complete Interview Roadmap
 
 > **Target Role**: AI / Research / Applied Scientist (GenAI / LLM focus)
-> **Approach**: Depth-first, theory-heavy, minimal code -- learn like a researcher, not just a practitioner
-> **How to use**: Study topics in order. Ask me to generate detailed notes for each topic one by one.
+> **Approach**: Depth-first, theory-heavy, minimal code -- learn the underlying mechanics like a researcher to build a rock-solid foundation.
+> **How to use**: Study topics in order. Use the suggested map below as a comprehensive guide.
 
 ---
 
-### Formatting Guidelines (for Claude -- follow these when generating notes)
+### Formatting Guidelines (for Claude)
 
-- **Equations**: Use LaTeX. Block equations with `$$...$$`, inline math with `$...$`. Notion renders these natively.
-- **Diagrams**: Use Mermaid diagrams inside ```mermaid code blocks for architecture flows, pipelines, and visual explanations. Notion renders these.
-- **Code**: Minimal. Only include code when it explains a concept better than words. This is a theory-focused resource, not a cookbook.
-- **ASCII art**: Use for attention matrices, mask patterns, and comparison layouts where Mermaid isn't suitable.
-- **Structure**: Every topic file must include a Table of Contents, and end with an "Interview Questions & Answers" section.
+- **Equations**: Use LaTeX ($...$ or $$...$$).
+- **Diagrams**: Use Mermaid diagrams for architecture flows.
+- **Structure**: Every topic file should include a Table of Contents and "Interview Q&A" section.
 
 ---
 
-## How This Roadmap Is Organized
+## Suggested Study Order & File Map
+
+Study topics sequentially using this map:
 
 ```
 Phase A: Foundations (Topics 1-4)         -- The bedrock. Skip at your peril.
@@ -854,9 +854,15 @@ When you ask me to generate notes for a topic, I'll create/update the correspond
 | 1. Probability, Statistics & Info Theory | `01_Probability_Statistics.md` | Done |
 | 2. Linear Algebra & Optimization | `02_Linear_Algebra_Optimization.md` | Done |
 | 3. Classical Machine Learning | `03_Classical_ML.md` | Done |
+<<<<<<< HEAD
 | 4. Deep Learning Foundations | `04_Deep_Learning_Foundations.md` | Pending |
 | 5. Tokenization | `05_Tokenization.md` | Done |
 | 6. Text Preprocessing & Embeddings | `06_Text_Preprocessing_Embeddings.md` | Pending |
+=======
+| 4. Deep Learning Foundations | `04_Deep_Learning_Foundations.md` | Done |
+| 5. Tokenization | `05_Tokenization.md` | Done |
+| 6. Text Preprocessing & Embeddings | `06_Text_Preprocessing_Embeddings.md` | Done |
+>>>>>>> origin/main
 | 7. Sequence Modeling | `07_Sequence_Modeling.md` | Pending |
 | 8. Attention Mechanisms | `08_Attention_Mechanisms.md` | Done |
 | 9. Transformer Architecture | `09_Transformer_Architecture.md` | Done |
@@ -903,6 +909,7 @@ For someone with ML/DL background (adjust if starting fresh):
 
 ---
 
+<<<<<<< HEAD
 ## How to Use This With Me
 
 1. Say: **"Generate notes for Topic X"** (e.g., "Generate notes for Topic 8: Attention Mechanisms")
@@ -917,5 +924,7 @@ For someone with ML/DL background (adjust if starting fresh):
 4. Study one topic per day for maximum retention
 
 ---
+=======
+>>>>>>> origin/main
 
 *Created: February 2026 | Target: AI Scientist (GenAI/LLM focus)*
