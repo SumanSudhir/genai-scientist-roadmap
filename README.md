@@ -24,7 +24,7 @@ Phase B: NLP Core (Topics 5-7)           -- Classical NLP before the transformer
 Phase C: Transformers (Topics 8-10)      -- The architecture that changed everything.
 Phase D: Language Models (Topics 11-13)  -- From BERT to GPT-4 to Llama 3.
 Phase E: Training LLMs (Topics 14-16)    -- Pretraining, fine-tuning, alignment.
-Phase F: Generation &Tic (Topics 17-19)    -- Decoding, prompting, in-context learning.
+Phase F: Generation & Prompting (Topics 17-19) -- Decoding, prompting, APIs.
 Phase G: Applications (Topics 20-22)     -- RAG, agents, multimodal.
 Phase H: Production (Topics 23-24)       -- Serving, optimization, system design.
 Phase I: Frontier (Topics 25-27)         -- Cutting-edge research, evaluation, safety.
@@ -854,16 +854,10 @@ When you ask me to generate notes for a topic, I'll create/update the correspond
 | 1. Probability, Statistics & Info Theory | `01_Probability_Statistics.md` | Done |
 | 2. Linear Algebra & Optimization | `02_Linear_Algebra_Optimization.md` | Done |
 | 3. Classical Machine Learning | `03_Classical_ML.md` | Done |
-<<<<<<< HEAD
-| 4. Deep Learning Foundations | `04_Deep_Learning_Foundations.md` | Pending |
-| 5. Tokenization | `05_Tokenization.md` | Done |
-| 6. Text Preprocessing & Embeddings | `06_Text_Preprocessing_Embeddings.md` | Pending |
-=======
 | 4. Deep Learning Foundations | `04_Deep_Learning_Foundations.md` | Done |
 | 5. Tokenization | `05_Tokenization.md` | Done |
 | 6. Text Preprocessing & Embeddings | `06_Text_Preprocessing_Embeddings.md` | Done |
->>>>>>> origin/main
-| 7. Sequence Modeling | `07_Sequence_Modeling.md` | Pending |
+| 7. Sequence Modeling | `07_Sequence_Modeling.md` | Done |
 | 8. Attention Mechanisms | `08_Attention_Mechanisms.md` | Done |
 | 9. Transformer Architecture | `09_Transformer_Architecture.md` | Done |
 | 10. Positional Encodings | `10_Positional_Encodings.md` | Done |
@@ -872,19 +866,19 @@ When you ask me to generate notes for a topic, I'll create/update the correspond
 | 13. Encoder-Decoder & Unified Models | `13_Encoder_Decoder_Models.md` | Done |
 | 14. Pretraining LLMs | `14_Pretraining.md` | Done |
 | 15. Fine-Tuning & PEFT | `15_Fine_Tuning_PEFT.md` | Done |
-| 16. Alignment (RLHF, DPO) | `16_Alignment_RLHF_DPO.md` | Pending |
-| 17. Decoding & Text Generation | `17_Decoding_Strategies.md` | Pending |
-| 18. Prompt Engineering | `18_Prompt_Engineering.md` | Pending |
-| 19. In-Context Learning (Theory) | `19_In_Context_Learning.md` | Pending |
+| 16. Alignment (RLHF, DPO) | `16_RLHF_Alignment.md` | Done |
+| 17. Decoding & Text Generation | `17_Decoding_Strategies.md` | Done |
+| 18. Prompt Engineering & ICL | `18_Prompt_Engineering.md` | Done |
+| 19. LLM APIs & Function Calling | `19_LLM_APIs_Function_Calling.md` | Done |
 | 20. RAG | `20_RAG.md` | Done |
 | 21. Agents & Tool Use | `21_Agents_Tool_Use.md` | Done |
 | 22. Multimodal AI | `22_Multimodal_AI.md` | Done |
 | 23. Inference Optimization | `23_Inference_Optimization.md` | Done |
 | 24. ML System Design | `24_ML_System_Design.md` | Done |
 | 25. Evaluation & Benchmarking | `25_Evaluation_Benchmarks.md` | Done |
-| 26. Safety & Ethics | `26_Safety_Ethics.md` | Pending |
-| 27. Research Frontiers | `27_Research_Frontiers.md` | Pending |
-| 28. Interview Strategy | `28_Interview_Strategy.md` | Pending |
+| 26. Safety & Ethics | `26_Safety_Ethics.md` | Done |
+| 27. Research Frontiers | `27_Research_Frontiers.md` | Done |
+| 28. Interview Strategy | `28_Target_Companies_And_Roles.md` | Done |
 
 ---
 
@@ -909,22 +903,5 @@ For someone with ML/DL background (adjust if starting fresh):
 
 ---
 
-<<<<<<< HEAD
-## How to Use This With Me
-
-1. Say: **"Generate notes for Topic X"** (e.g., "Generate notes for Topic 8: Attention Mechanisms")
-2. I'll create comprehensive, interview-ready notes with:
-   - Deep conceptual explanations (the "why" behind everything)
-   - Mathematical formulations where they add clarity
-   - Intuitive analogies for complex concepts
-   - Diagrams in ASCII/text format
-   - Interview Q&A at the end of each topic
-   - Minimal code -- only when it clarifies a concept better than words
-3. For existing files (Topics 5-8, 15), I'll expand and improve them
-4. Study one topic per day for maximum retention
-
----
-=======
->>>>>>> origin/main
 
 *Created: February 2026 | Target: AI Scientist (GenAI/LLM focus)*
