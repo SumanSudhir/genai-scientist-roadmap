@@ -19,12 +19,10 @@
 6. [Fine-Tuning BERT for Downstream Tasks](#6-fine-tuning-bert-for-downstream-tasks)
 7. [RoBERTa — BERT Done Right](#7-roberta--bert-done-right)
 8. [ALBERT — A Lite BERT](#8-albert--a-lite-bert)
-9. [DeBERTa — Disentangled Attention](#9-deberta--disentangled-attention)
-10. [ELECTRA — Replaced Token Detection](#10-electra--replaced-token-detection)
-11. [Sentence-BERT and Embedding Models](#11-sentence-bert-and-embedding-models)
-12. [Encoder Models in the LLM Era (2024-2026)](#12-encoder-models-in-the-llm-era-2024-2026)
-13. [Full Comparison of BERT-Family Models](#13-full-comparison-of-bert-family-models)
-14. [Interview Questions & Answers](#14-interview-questions--answers)
+9. [ELECTRA — Replaced Token Detection](#9-electra--replaced-token-detection)
+10. [Sentence-BERT and Embedding Models](#10-sentence-bert-and-embedding-models)
+11. [Full Comparison of BERT-Family Models](#11-full-comparison-of-bert-family-models)
+12. [Interview Questions & Answers](#12-interview-questions--answers)
 
 ---
 
@@ -257,6 +255,34 @@ The prediction head consists of:
 3. Layer normalization
 4. Linear projection to vocabulary ($d \to V$), weight-tied with the embedding matrix
 
+### 4.5 MLM Masking — Concrete Walkthrough
+
+Input sentence: "The quick brown fox jumps over the lazy dog"
+(10 tokens. MLM masks 15% = ~1-2 tokens)
+
+**Masking step** (applied once per sequence):
+  Token 3 "brown" → 80% chance: replace with [MASK]
+                  → 10% chance: replace with random token (e.g., "blue")
+                  → 10% chance: keep as "brown"
+
+**What BERT sees** (80% case):
+  Input:  [CLS] The quick [MASK] fox jumps over the lazy dog [SEP]
+  Task:   Predict "brown" for the [MASK] position
+
+**Why the 10%/10% split**:
+  - If always [MASK]: model only learns to predict [MASK] tokens, doesn't build
+    general representations for non-[MASK] tokens (which dominate fine-tuning)
+  - Random replacement (10%): forces model to check every token, not just [MASK]
+  - Keep original (10%): biases representations toward the actual token
+
+**BERT's output at [MASK] position**:
+  768-dim vector → linear layer → 30,522-dim logits → softmax → predict "brown"
+  Loss = cross-entropy at masked positions only (not the whole sequence)
+
+**Comparison to CLM (GPT)**:
+  BERT MLM: sees full context including RIGHT side of [MASK] → bidirectional
+  GPT CLM:  only sees tokens to the LEFT → unidirectional, but can generate
+
 ---
 
 ## 5. Next Sentence Prediction (NSP)
@@ -402,6 +428,42 @@ BERT fine-tuning works with surprisingly little data:
 
 This is the power of pretraining: the model already "knows" language. Fine-tuning just steers that knowledge toward the task.
 
+### 6.5 Fine-Tuning Architectures for Downstream Tasks
+
+**Sentence Classification** (e.g., sentiment):
+```
+[CLS] The movie was great [SEP]
+  ↓
+BERT (12 layers of self-attention)
+  ↓
+[CLS] representation (768-dim) ← only this position is used
+  ↓
+Linear layer (768 → num_classes)
+  ↓
+Softmax → [positive: 0.95, negative: 0.05]
+```
+
+**Token Classification** (e.g., NER):
+```
+[CLS] Paris  is  the  capital  of  France [SEP]
+  ↓ (BERT processes all tokens jointly)
+  B-LOC O   O    O      O     O   B-LOC   ← label for each token
+  ↑
+Each token's 768-dim output → Linear (768 → num_labels) → softmax
+```
+
+**Question Answering** (SQuAD):
+```
+[CLS] [Question] [SEP] [Context passage] [SEP]
+  ↓
+BERT
+  ↓
+Each context token's output → Linear → start/end logit
+Answer span = argmax(start_score[i]) to argmax(end_score[j]), i≤j
+```
+
+**Why [CLS] works for classification**: The [CLS] token attends to all other tokens (self-attention is bidirectional). By training time, it aggregates the sentence's meaning. For classification, we only need one vector per sentence, so [CLS] is the natural choice.
+
 ---
 
 ## 7. RoBERTa — BERT Done Right
@@ -440,225 +502,51 @@ RoBERTa set new state-of-the-art on GLUE, SQuAD, and RACE benchmarks, surpassing
 
 RoBERTa's lesson is critical for interviews: **before redesigning the architecture, optimize the training recipe**. Many "architectural improvements" in NLP papers actually came from better training — more data, larger batches, longer training, better hyperparameters. Always ablate properly.
 
+### 7.6 BERT Family Comparison Table
+
+| Model | Training Data | NSP | Masking | Key Change | GLUE Score |
+|-------|--------------|-----|---------|------------|------------|
+| BERT-base | 16GB BooksCorpus+Wiki | Yes | Static (pre-masked) | Original | 79.6 |
+| BERT-large | Same | Yes | Static | More params | 80.5 |
+| RoBERTa | 160GB (10x more) | **No** | **Dynamic** (re-mask each epoch) | More data, no NSP | 88.5 |
+| ALBERT | Same as BERT | Yes | Same | Factored emb + layer sharing | 89.4 |
+| DeBERTa | 160GB | No | Dynamic | Disentangled attention | 91.8 |
+
+**Key takeaways**:
+1. NSP turned out to hurt more than help (RoBERTa dropped it, improved significantly)
+2. More data + dynamic masking matters more than architecture changes (RoBERTa)
+3. Layer sharing (ALBERT) reduces params but not FLOPs — inference speed stays the same
+4. For most production use cases today, RoBERTa or DeBERTa-base are the go-to encoder models
+
 ---
 
 ## 8. ALBERT — A Lite BERT
 
-### 8.1 Motivation
+### 8.1 Key Parameter Reduction Techniques
 
-BERT-Large has 340M parameters. ALBERT (Lan et al., 2020) asked: can we get similar or better performance with far fewer parameters?
+BERT-Large has 340M parameters. ALBERT (Lan et al., 2020) reduces this through two innovations:
 
-### 8.2 Two Key Innovations
+**Factorized Embedding Parameters**: In BERT, the embedding matrix is $V \times d_{\text{model}}$ — large and tied to hidden size. ALBERT factorizes into two smaller matrices: $(V \times E) \times (E \times d_{\text{model}})$ where $E \ll d_{\text{model}}$ (e.g., $E = 128$). Token embeddings are context-independent (only need to distinguish tokens), while hidden states are context-dependent (need full capacity). Decoupling them saves ~6× in embedding parameters.
 
-#### Innovation 1: Factorized Embedding Parameters
+**Cross-Layer Parameter Sharing**: ALBERT uses the same weight matrix for every transformer layer. This reduces unique parameters by $L\times$, allowing a wider hidden dimension ($d = 4096$) without parameter explosion. Each layer still receives different inputs (output of the previous layer), so representations still evolve — think of it as iterative refinement with the same function.
 
-In BERT, the embedding dimension equals the hidden dimension: $E = d_{\text{model}}$. This means the embedding matrix is $V \times d_{\text{model}}$ — large and parameter-heavy.
-
-ALBERT factorizes this into two smaller matrices:
-
-$$
-V \times d_{\text{model}} \longrightarrow (V \times E) \times (E \times d_{\text{model}})
-$$
-
-where $E \ll d_{\text{model}}$ (e.g., $E = 128$ instead of $d = 768$).
-
-**Why this makes sense**: Token embeddings are **context-independent** — they need only enough capacity to distinguish tokens. The hidden dimension is **context-dependent** — it needs capacity for complex contextual representations. These are fundamentally different requirements, so tying them ($E = d$) is suboptimal.
-
-**Parameter savings**: For $V = 30000, d = 768$:
-- BERT: $30000 \times 768 = 23M$ embedding parameters
-- ALBERT ($E = 128$): $30000 \times 128 + 128 \times 768 = 3.84M + 0.098M \approx 3.9M$
-- **Savings: ~6×** reduction in embedding parameters
-
-#### Innovation 2: Cross-Layer Parameter Sharing
-
-ALBERT shares parameters **across all transformer layers**:
-
-$$
-\text{Block}_1 = \text{Block}_2 = \cdots = \text{Block}_L
-$$
-
-The same set of weights is used for every layer. This dramatically reduces parameters:
-
-| Model | Layers | Unique Layer Params | Total |
-|-------|--------|-------------------|-------|
-| BERT-Large | 24 | 24 sets | 340M |
-| ALBERT-xxlarge | 12 | **1 set** | **235M** (but $d = 4096$) |
-
-ALBERT can use a **much wider** hidden dimension ($d = 4096$ vs BERT-Large's $d = 1024$) because sharing eliminates the parameter multiplication by $L$.
-
-**What sharing means**: Layer 1 and Layer 12 apply the exact same linear transformations. But the **inputs** to each layer are different (the output of the previous layer), so the representations still evolve across depth. Think of it as applying the same function repeatedly — like an iterative refinement process.
-
-### 8.3 SOP Replaces NSP
-
-ALBERT replaces NSP with **Sentence Order Prediction (SOP)**:
-
-- **Positive**: Two consecutive sentences in order (A, B)
-- **Negative**: Two consecutive sentences **swapped** (B, A)
-
-SOP is harder than NSP because both sentences are from the same document (same topic). The model must learn **discourse coherence**, not just topic matching.
-
-### 8.4 Trade-offs
-
-| Aspect | ALBERT's Advantage | ALBERT's Disadvantage |
-|--------|-------------------|----------------------|
-| Parameter count | Much smaller | — |
-| Inference speed | — | **Slower** — same compute per layer, just fewer unique params |
-| Performance | Competitive or better | — |
-| Memory (training) | Less (gradient memory proportional to unique params) | — |
-
-**Critical point**: ALBERT reduces **parameters** but not **computation**. Each layer still requires the same matrix multiplications — sharing just means the weight matrices happen to be identical. Inference speed is the same as a model with the same number of layers.
+**Critical caveat**: ALBERT reduces *parameters* but not *computation*. Inference FLOPs are unchanged — the same matrix multiplications occur at each layer. Speed does not improve.
 
 ---
 
-## 9. DeBERTa — Disentangled Attention
+## 9. ELECTRA — Replaced Token Detection
 
-### 9.1 The Key Idea
+ELECTRA (Clark et al., 2020) addresses MLM's training inefficiency: BERT only receives signal from the 15% of tokens it masks, while 85% provide no gradient.
 
-DeBERTa (He et al., 2021) argues that BERT conflates two types of information in its attention scores:
+**Key idea**: Use a generator-discriminator setup. A small BERT generator predicts masked tokens; a full-size discriminator classifies **every** token as "original" or "replaced." The discriminator receives training signal from 100% of tokens — ~6.7× more efficient than MLM. ELECTRA matches BERT with 1/4 of the compute and outperforms it with equal compute.
 
-1. **Content-to-content**: What does this word mean, and what does that word mean?
-2. **Content-to-position**: What does this word mean, and where is that word?
-3. **Position-to-content**: Where is this word, and what does that word mean?
-4. **Position-to-position**: Where is this word, and where is that word?
-
-BERT computes a single attention score that mixes all four. DeBERTa **disentangles** content and position into separate representations.
-
-### 9.2 Mathematical Formulation
-
-Each token has two representations:
-- $\mathbf{H}_i$ — the **content** vector (what the token means in context)
-- $\mathbf{P}_{i|j}$ — the **relative position** vector (encoding position $i$ relative to position $j$)
-
-The attention score between positions $i$ and $j$ decomposes into three terms:
-
-$$
-A_{ij} = \underbrace{\mathbf{H}_i \mathbf{W}_Q^c {\mathbf{W}_K^c}^T \mathbf{H}_j^T}_{(1) \text{ content-to-content}} + \underbrace{\mathbf{H}_i \mathbf{W}_Q^c {\mathbf{W}_K^p}^T \mathbf{P}_{j|i}^T}_{(2) \text{ content-to-position}} + \underbrace{\mathbf{P}_{i|j} \mathbf{W}_Q^p {\mathbf{W}_K^c}^T \mathbf{H}_j^T}_{(3) \text{ position-to-content}}
-$$
-
-Note: the position-to-position term (4) is dropped as it carries minimal information.
-
-**Why three separate projection matrices?** Each interaction type may require different learned transformations:
-- $\mathbf{W}_Q^c, \mathbf{W}_K^c$: content query and key projections
-- $\mathbf{W}_K^p$: position key projection (how is position used as a key?)
-- $\mathbf{W}_Q^p$: position query projection (how is position used as a query?)
-
-### 9.3 Relative Position Encoding
-
-DeBERTa uses **relative position embeddings** (not absolute). The position encoding $\mathbf{P}_{i|j}$ depends only on the offset $\delta = i - j$, with clipping:
-
-$$
-\mathbf{P}_{i|j} = \mathbf{P}_{\text{clip}(i-j, -k, k)}
-$$
-
-where $k$ is the maximum relative distance (default: $k = 512$). This is similar to Shaw et al.'s approach (see [Topic 10](10_Positional_Encodings.md)) but used within the disentangled framework.
-
-### 9.4 Enhanced Mask Decoder (EMD)
-
-For the MLM prediction head, DeBERTa adds **absolute position information** at the very end (just before the softmax). The intuition: relative position is sufficient for encoding contextual relationships, but for predicting the masked token, knowing the absolute position can help (e.g., certain tokens are more likely at the start of sentences).
-
-This is done by incorporating absolute position embeddings only in the decoding layer:
-
-$$
-\mathbf{h}_i^{\text{decode}} = \mathbf{h}_i^{(L)} + \mathbf{p}_i^{\text{abs}}
-$$
-
-### 9.5 DeBERTa v3
-
-DeBERTa v3 (2023) further improves with:
-- **ELECTRA-style pretraining** (replaced token detection — see Section 10)
-- **Gradient-disentangled embedding sharing**: The generator and discriminator share embeddings, but gradients from the discriminator don't flow back through the shared embeddings to the generator
-- State-of-the-art on SuperGLUE and many NLU benchmarks
-
-### 9.6 Why DeBERTa Matters
-
-DeBERTa shows that **how you handle position matters enormously**. By separating content and position:
-
-1. The model can learn distinct attention patterns for "attend to what's semantically relevant" vs "attend to what's nearby"
-2. Relative position avoids the hard sequence length limit of learned absolute embeddings
-3. Performance improves significantly, especially on tasks requiring precise positional reasoning (NER, span extraction)
-
-DeBERTa v3 is currently the **strongest encoder-only model** and the default recommendation for classification and NLU tasks.
+After pretraining, only the discriminator is kept for fine-tuning (the generator is discarded). Fine-tuning proceeds identically to BERT.
 
 ---
 
-## 10. ELECTRA — Replaced Token Detection
+## 10. Sentence-BERT and Embedding Models
 
-### 10.1 The Efficiency Problem with MLM
-
-BERT's MLM masks 15% of tokens and only computes loss on those tokens. This means 85% of the input provides no training signal. ELECTRA (Clark et al., 2020) addresses this inefficiency.
-
-### 10.2 The Architecture: Generator-Discriminator
-
-ELECTRA uses a two-model setup inspired by GANs (but trained differently):
-
-**Generator** (small BERT): A small MLM model that predicts masked tokens
-
-$$
-x_i^{\text{gen}} \sim P_G(x_i \mid \mathbf{x}_{\text{masked}})
-$$
-
-**Discriminator** (full-size BERT): Classifies **every** token as "original" or "replaced"
-
-$$
-D(x_i) = \text{sigmoid}(\mathbf{w}^T \mathbf{h}_i)
-$$
-
-```
-Original:     The  chef  cooked  the  meal
-Masked:       The  [M]   cooked  the  [M]
-Generator:    The  artist cooked  the  meal    (artist is wrong, meal is correct)
-                    ↓                   ↓
-Labels:       orig  REPLACED  orig  orig  orig
-                    ↓                   ↓
-Discriminator predicts: original or replaced? (for ALL tokens)
-```
-
-### 10.3 Training
-
-The two models are trained jointly:
-
-$$
-\mathcal{L} = \mathcal{L}_{\text{MLM}}^{\text{generator}} + \lambda \cdot \mathcal{L}_{\text{RTD}}^{\text{discriminator}}
-$$
-
-**Generator loss**: Standard MLM loss on masked positions
-
-**Discriminator loss**: Binary cross-entropy on ALL positions
-
-$$
-\mathcal{L}_{\text{RTD}} = -\sum_{i=1}^{n} \left[\mathbb{1}(x_i^{\text{gen}} = x_i) \log D(x_i) + \mathbb{1}(x_i^{\text{gen}} \neq x_i) \log(1 - D(x_i))\right]
-$$
-
-**Key differences from GANs**:
-- The generator is trained with **MLE** (maximum likelihood), not adversarial loss
-- No minimax game — both models improve independently
-- The generator is deliberately kept **small** (~1/4 to 1/3 of discriminator size)
-
-### 10.4 Why ELECTRA Is More Efficient
-
-| | BERT (MLM) | ELECTRA (RTD) |
-|--|-----------|--------------|
-| Tokens with training signal | 15% (masked only) | **100%** (all tokens) |
-| Training signal per token | Predict from $V$ tokens (hard, but rare) | Binary (easy, but dense) |
-| Training efficiency | ~6.7× less signal per sequence | Full signal utilization |
-
-The result: ELECTRA matches BERT's performance with **1/4 of the compute** and exceeds it with equal compute.
-
-### 10.5 After Pretraining
-
-Only the **discriminator** is kept for fine-tuning (the generator is discarded). The discriminator is fine-tuned exactly like BERT — add a task-specific head and train end-to-end.
-
-### 10.6 Why the Generator Must Be Small
-
-If the generator is as good as the discriminator, the replaced tokens would be almost indistinguishable from originals — the discrimination task becomes too easy, and the discriminator doesn't learn useful representations.
-
-A small generator makes "mistakes" that are plausible but detectable (e.g., replacing "chef" with "artist" — grammatically correct but contextually wrong). This forces the discriminator to develop deep language understanding.
-
----
-
-## 11. Sentence-BERT and Embedding Models
-
-### 11.1 BERT's Problem with Sentence Similarity
+### 10.1 BERT's Problem with Sentence Similarity
 
 Using BERT for sentence similarity naively requires encoding **every pair** through the full model:
 
@@ -668,7 +556,7 @@ $$
 
 For $n$ sentences, this requires $\binom{n}{2} = O(n^2)$ forward passes. Finding the most similar pair among 10,000 sentences requires **~50 million** BERT inferences — completely infeasible.
 
-### 11.2 Sentence-BERT (SBERT)
+### 10.2 Sentence-BERT (SBERT)
 
 Reimers & Gurevych (2019) proposed Sentence-BERT: use a **siamese network** structure to produce fixed-size sentence embeddings independently.
 
@@ -690,7 +578,7 @@ $$
 \text{sim}(A, B) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\| \cdot \|\mathbf{v}\|}
 $$
 
-### 11.3 Training SBERT
+### 10.3 Training SBERT
 
 SBERT is fine-tuned on sentence pairs with different objectives:
 
@@ -714,7 +602,7 @@ $$
 
 where $(\mathbf{u}_i, \mathbf{v}_i)$ is a positive pair and all other pairs in the batch are negatives. $\tau$ is a temperature parameter.
 
-### 11.4 The Key Advantage: Decoupled Encoding
+### 10.4 The Key Advantage: Decoupled Encoding
 
 With SBERT, each sentence is encoded **once** into a fixed-size vector. These vectors can be:
 
@@ -724,7 +612,7 @@ With SBERT, each sentence is encoded **once** into a fixed-size vector. These ve
 
 Finding the most similar pair among 10,000 sentences: encode all 10,000 (10,000 forward passes), then compare all pairs with cosine similarity (instant, using FAISS or similar). Total time: seconds instead of hours.
 
-### 11.5 Modern Embedding Models
+### 10.5 Modern Embedding Models
 
 The SBERT paradigm evolved into a family of modern embedding models:
 
@@ -738,7 +626,7 @@ The SBERT paradigm evolved into a family of modern embedding models:
 | **OpenAI text-embedding-3** | Proprietary | 256-3072 | Unknown | Matryoshka, strong commercial |
 | **Cohere Embed v3** | Proprietary | 1024 | Unknown | Multilingual, compression |
 
-### 11.6 Key Training Techniques for Modern Embedding Models
+### 10.6 Key Training Techniques for Modern Embedding Models
 
 **Hard negative mining**: Instead of random negatives (easy to distinguish), use negatives that are semantically similar but not matches. This forces the model to learn fine-grained distinctions.
 
@@ -754,67 +642,9 @@ This allows a single model to produce different embeddings depending on the down
 
 ---
 
-## 12. Encoder Models in the LLM Era (2024-2026)
+## 11. Full Comparison of BERT-Family Models
 
-### 12.1 Are Encoder Models Dead?
-
-No. Despite the dominance of decoder-only LLMs, encoder models remain the best choice for several critical use cases:
-
-| Use Case | Why Encoder Wins |
-|----------|-----------------|
-| **Text classification** | Faster, cheaper, more accurate per parameter than prompting an LLM |
-| **Named entity recognition** | Per-token classification is natural; LLMs often struggle with exact span boundaries |
-| **Sentence embeddings / retrieval** | Bidirectional encoding produces superior embeddings; decoders can't naturally produce fixed-size vectors |
-| **Semantic search** | Embed-then-search is orders of magnitude faster than LLM-based comparison |
-| **Reranking** | Cross-encoder reranking (feeding query+document through BERT) is the gold standard |
-| **Real-time applications** | BERT inference: ~5ms. GPT-4 generation: ~500ms-2s |
-
-### 12.2 When to Use Encoder vs Decoder
-
-```
-                       ┌──────────────────────┐
-                       │   What's the task?    │
-                       └──────────┬───────────┘
-                                  │
-                    ┌─────────────┴─────────────┐
-                    │                           │
-              Understanding?              Generation?
-                    │                           │
-              ┌─────┴─────┐              Decoder-only
-              │           │              (GPT, Llama)
-         Classification  Embeddings
-         NER, Spans      Retrieval
-              │           │
-        Encoder model   Encoder model
-        (DeBERTa v3)    (BGE, E5, GTE)
-```
-
-### 12.3 The Cost Argument
-
-For production classification systems:
-
-| Approach | Model | Latency | Cost per 1M requests |
-|----------|-------|---------|---------------------|
-| Fine-tuned DeBERTa v3 | 304M params | ~5ms | ~$2 (self-hosted) |
-| GPT-4 zero-shot | ~1.8T params | ~1-2s | ~$3,000 (API) |
-| GPT-4 fine-tuned | ~1.8T params | ~500ms | ~$6,000 (API) |
-
-For high-volume production workloads, encoder models are **1000× cheaper** with comparable or better accuracy.
-
-### 12.4 Encoder Models as Components in LLM Systems
-
-Encoder models play critical roles within modern LLM systems:
-
-1. **RAG retrieval**: Embedding models (BGE, E5) encode documents and queries for vector search
-2. **Reranking**: Cross-encoder models rerank retrieved results before feeding to the LLM
-3. **Classification guardrails**: Fast encoder classifiers detect toxic input/output
-4. **Intent detection**: Route user queries to appropriate agents/tools
-
----
-
-## 13. Full Comparison of BERT-Family Models
-
-### 13.1 Architecture Comparison
+### 11.1 Architecture Comparison
 
 | Model | Year | Innovation | Params (base) | Key Result |
 |-------|------|-----------|---------------|------------|
@@ -825,7 +655,7 @@ Encoder models play critical roles within modern LLM systems:
 | **ELECTRA** | 2020 | Replaced token detection (100% token signal) | 14M-335M | 4× more efficient than MLM |
 | **DeBERTa v3** | 2023 | DeBERTa + ELECTRA-style training | 86M-304M | **Current best encoder model** |
 
-### 13.2 Performance Evolution (Approximate GLUE/SuperGLUE scores)
+### 11.2 Performance Evolution (Approximate GLUE/SuperGLUE scores)
 
 ```
 BERT-base (2018)    ████████████████████░░░░░░  ~80
@@ -836,7 +666,7 @@ DeBERTa-v3 (2023)   ████████████████████
                      0                          100
 ```
 
-### 13.3 Decision Matrix: Which Encoder to Use?
+### 11.3 Decision Matrix: Which Encoder to Use?
 
 | Scenario | Recommendation |
 |----------|---------------|
@@ -849,7 +679,7 @@ DeBERTa-v3 (2023)   ████████████████████
 
 ---
 
-## 14. Interview Questions & Answers
+## 12. Interview Questions & Answers
 
 ### Q1: How does MLM work? Why mask 15%? What is the 80/10/10 masking strategy?
 

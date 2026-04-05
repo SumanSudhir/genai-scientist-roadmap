@@ -17,9 +17,7 @@
 5. [Maximum A Posteriori (MAP)](#5-maximum-a-posteriori-map)
 6. [Information Theory](#6-information-theory)
 7. [Connecting Information Theory to ML](#7-connecting-information-theory-to-ml)
-8. [Hypothesis Testing](#8-hypothesis-testing)
-9. [A/B Testing for AI Systems](#9-ab-testing-for-ai-systems)
-10. [Interview Questions & Answers](#10-interview-questions--answers)
+8. [Interview Questions & Answers](#8-interview-questions--answers)
 
 ---
 
@@ -353,6 +351,26 @@ So when you hear "we train a language model with cross-entropy loss," you're hea
 
 **Invariance**: If $\theta_{MLE}$ is the MLE of $\theta$, then $f(\theta_{MLE})$ is the MLE of $f(\theta)$ for any function $f$.
 
+### 4.5 MLE Worked Example: Biased Coin
+
+You flip a coin 10 times and observe **7 Heads, 3 Tails**. What is $p$ (probability of heads)?
+
+**Model**: Each flip is Bernoulli($p$). The likelihood of the data:
+
+$$P(D \mid p) = p^7 (1-p)^3$$
+
+**Log-likelihood**:
+
+$$\log P(D \mid p) = 7 \log p + 3 \log(1-p)$$
+
+**Take derivative and set to zero**:
+
+$$\frac{d}{dp} = \frac{7}{p} - \frac{3}{1-p} = 0 \implies 7(1-p) = 3p \implies p_{MLE} = \frac{7}{10} = 0.7$$
+
+**MLE answer**: $p = 0.7$ — literally the observed frequency. MLE always gives you the empirical proportion for a Bernoulli.
+
+**The problem**: With only 10 flips, is 0.7 a reliable estimate? MLE has no mechanism to say "probably close to 0.5 for a typical coin." That's where MAP comes in.
+
 ---
 
 ## 5. Maximum A Posteriori (MAP)
@@ -403,6 +421,37 @@ This is L1-regularized MLE (Lasso). The Laplace prior has sharp peaks at zero, w
 - **Dropout** can be interpreted as approximate Bayesian inference
 - **The KL term in RLHF**: $\beta \cdot D_{KL}(\pi_\theta \| \pi_{\text{ref}})$ acts as a prior keeping the aligned model close to the reference -- this is structurally identical to MAP estimation where the prior is the reference policy
 
+### 5.4 MAP Worked Example: Coin with Prior
+
+Same coin problem (7H, 3T), but now we use a **Beta(2, 2) prior** — encoding the belief that the coin is probably near-fair.
+
+The Beta distribution is the conjugate prior for the Bernoulli:
+
+$$P(p) = \text{Beta}(\alpha, \beta) \propto p^{\alpha-1}(1-p)^{\beta-1}$$
+
+**MAP objective** (log-likelihood + log-prior):
+
+$$\log P(D \mid p) + \log P(p) = 7\log p + 3\log(1-p) + 1\log p + 1\log(1-p)$$
+
+$$= (7+1)\log p + (3+1)\log(1-p) = 8\log p + 4\log(1-p)$$
+
+**MAP estimate**:
+
+$$p_{MAP} = \frac{8}{8+4} = \frac{8}{12} \approx 0.667$$
+
+```
+Comparison:
+  MLE:  p = 7/(7+3) = 0.700   (only the data, no skepticism)
+  MAP:  p = 8/(8+4) = 0.667   (data + prior that coin is fair-ish)
+  True: unknown, but prior pulls toward 0.5
+
+With 100 flips (70H, 30T):
+  MLE:  p = 70/100 = 0.700
+  MAP:  p = 71/102 = 0.696   (prior has tiny effect with large data)
+```
+
+**The key insight**: MAP = adding pseudo-counts from the prior. With more data, the prior matters less and MLE and MAP converge. With small data, the prior dominates — which is often what you want.
+
 ---
 
 ## 6. Information Theory
@@ -443,6 +492,29 @@ $$H(X) = E[-\log P(X)] = -\sum_x P(x) \log P(x)$$
 - A uniform distribution over 50,000 tokens has $H = \log_2(50000) \approx 15.6$ bits
 
 **In NLP**: The entropy of natural language (English) is estimated at ~1.0-1.5 bits per character. A perfect language model would achieve this entropy. Current models are approaching but haven't reached this limit.
+
+### 6.2.1 Entropy as Uncertainty — Visual
+
+```
+Distribution over next word (4 candidates):
+
+HIGH ENTROPY — uncertain, spread out:
+  "cat"   ████████████  0.25
+  "dog"   ████████████  0.25
+  "bird"  ████████████  0.25
+  "fish"  ████████████  0.25
+  H = -4 × (0.25 × log₂(0.25)) = 2.0 bits
+
+LOW ENTROPY — confident, peaked:
+  "cat"   ████████████████████████████████████  0.90
+  "dog"   ██  0.05
+  "bird"  █   0.03
+  "fish"  █   0.02
+  H = -(0.90×log₂(0.90) + 0.05×log₂(0.05) + 0.03×log₂(0.03) + 0.02×log₂(0.02))
+    ≈ 0.47 bits
+```
+
+A well-trained language model produces low-entropy distributions when the context strongly implies the next word (e.g., "Paris is the capital of ___" → "France" gets ~0.99) and high-entropy distributions when many words are plausible (e.g., "I like to eat ___").
 
 ### 6.3 Cross-Entropy
 
@@ -554,6 +626,29 @@ Properties:
 
 Used in: The original GAN training objective is related to JSD between real and generated distributions.
 
+### 6.6.1 KL Divergence Worked Example
+
+**Scenario**: True next-token distribution $P$ vs model's predicted distribution $Q$ for the sentence "The capital of France is ___".
+
+$$P = \{\text{France}: 0.90,\ \text{Paris}: 0.08,\ \text{Lyon}: 0.02\}$$
+$$Q = \{\text{France}: 0.60,\ \text{Paris}: 0.30,\ \text{Lyon}: 0.10\}$$
+
+**Compute $D_{KL}(P \| Q)$** (forward KL, used in training):
+
+$$D_{KL}(P \| Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)}$$
+
+$$= 0.90 \times \log\frac{0.90}{0.60} + 0.08 \times \log\frac{0.08}{0.30} + 0.02 \times \log\frac{0.02}{0.10}$$
+
+$$= 0.90 \times \log(1.5) + 0.08 \times \log(0.267) + 0.02 \times \log(0.2)$$
+
+$$= 0.90 \times 0.405 + 0.08 \times (-1.322) + 0.02 \times (-1.609)$$
+
+$$= 0.365 - 0.106 - 0.032 = 0.227 \text{ nats}$$
+
+**Interpretation**: The model is penalized heavily for under-estimating "France" (the high-probability token). This is the "mean-seeking" property — forward KL forces $Q$ to put mass wherever $P$ has mass.
+
+**Cross-entropy** = $H(P) + D_{KL}(P \| Q) = H(P) + 0.227$. Since $H(P)$ is constant w.r.t. model params, minimizing cross-entropy in training is exactly minimizing this KL.
+
 ---
 
 ## 7. Connecting Information Theory to ML
@@ -608,128 +703,7 @@ $$\text{Attention output} = \mathbb{E}_{j \sim \text{attention\_weights}} [V_j]$
 
 ---
 
-## 8. Hypothesis Testing
-
-### 8.1 The Framework
-
-Hypothesis testing is the formal framework for making data-driven decisions under uncertainty.
-
-**Null Hypothesis ($H_0$)**: The default assumption (e.g., "the two models perform equally")
-**Alternative Hypothesis ($H_1$)**: What we want to show (e.g., "model A is better than model B")
-
-**Procedure**:
-1. Assume $H_0$ is true
-2. Compute a test statistic from the data
-3. Calculate the p-value: the probability of observing a result at least as extreme as the data, assuming $H_0$ is true
-4. If p-value $< \alpha$ (significance level, typically 0.05), reject $H_0$
-
-### 8.2 Key Concepts
-
-**p-value**: $P(\text{data this extreme or more} \mid H_0 \text{ is true})$. NOT the probability that $H_0$ is true.
-
-Common misinterpretation: "p = 0.03 means there's a 3% chance the null is true." WRONG. It means: "If the null were true, there's a 3% chance of seeing data this extreme."
-
-**Significance level ($\alpha$)**: The threshold for rejection, typically 0.05 or 0.01. This is the Type I error rate you're willing to accept.
-
-**Type I Error (False Positive)**: Rejecting $H_0$ when it's actually true. Rate $= \alpha$.
-**Type II Error (False Negative)**: Failing to reject $H_0$ when $H_1$ is true. Rate $= \beta$.
-
-**Power** $= 1 - \beta$: The probability of correctly detecting a real effect. Higher power is better.
-
-**Factors that increase power**:
-- Larger sample size
-- Larger effect size
-- Higher significance level ($\alpha$)
-- Lower variance
-
-### 8.3 Common Tests
-
-**t-test**: Compare means of two groups. Assumes roughly Gaussian data.
-- **Paired t-test**: Before/after on the same subjects (e.g., same users with old vs new model)
-- **Independent t-test**: Two separate groups
-
-**Chi-squared test**: Test independence of categorical variables.
-
-**Bootstrap test**: Resample data with replacement to estimate the distribution of a statistic. Non-parametric -- makes no distributional assumptions.
-
-### 8.4 Multiple Testing Problem
-
-If you test 20 hypotheses at $\alpha = 0.05$, you expect 1 false positive purely by chance.
-
-**Corrections**:
-- **Bonferroni**: Divide $\alpha$ by the number of tests. Conservative.
-- **Benjamini-Hochberg (FDR control)**: Controls the false discovery rate. Less conservative, more commonly used in practice.
-
----
-
-## 9. A/B Testing for AI Systems
-
-### 9.1 Why A/B Testing Matters for GenAI
-
-You've trained a new LLM variant or RAG system. Offline metrics (perplexity, BLEU, ROUGE) look better. Should you deploy it? You can't know for sure without an A/B test on real users.
-
-A/B testing is the gold standard for measuring the causal effect of a change on real-world metrics.
-
-### 9.2 Designing an A/B Test
-
-**Step 1: Define metrics**
-- **Primary metric** (guardrail): The ONE metric that determines success (e.g., user satisfaction, task completion rate)
-- **Secondary metrics**: Additional signals (e.g., latency, cost per query, hallucination rate)
-- **Guardrail metrics**: Must not degrade (e.g., safety violations, crash rate)
-
-**Step 2: Determine sample size**
-
-The required sample size depends on:
-- **Minimum Detectable Effect (MDE)**: The smallest improvement you care about (e.g., 2% improvement in click-through rate)
-- **Baseline metric value**: The current performance level
-- **Variance**: Higher variance requires more samples
-- **Significance level ($\alpha$)**: Usually 0.05
-- **Power ($1 - \beta$)**: Usually 0.80 or 0.90
-
-For a two-sample proportion test:
-
-$$n = \frac{(Z_{\alpha/2} + Z_\beta)^2 \left[p_1(1-p_1) + p_2(1-p_2)\right]}{(p_2 - p_1)^2}$$
-
-**Step 3: Randomization**
-- Randomly assign users (not requests) to control (A) and treatment (B)
-- User-level randomization avoids contamination from the same user seeing both variants
-- Stratify by important confounders (geography, device type)
-
-**Step 4: Run the test**
-- Run for a pre-determined duration (don't peek and stop early -- this inflates false positive rate)
-- Account for novelty effects and day-of-week effects (run for at least 1-2 weeks)
-
-**Step 5: Analyze results**
-- Compute the test statistic and p-value
-- Check for statistical significance AND practical significance
-- A statistically significant 0.01% improvement may not be worth the engineering cost
-
-### 9.3 Common Pitfalls
-
-**Peeking problem**: Looking at results daily and stopping when significant inflates Type I error. Use sequential testing methods (e.g., always-valid p-values) if you need early stopping.
-
-**Network effects**: In social platforms, user A's experience can affect user B's. Standard A/B tests assume independence.
-
-**Simpson's paradox**: A trend that appears in subgroups can reverse when groups are combined. Always segment analysis by key dimensions.
-
-### 9.4 A/B Testing for LLMs Specifically
-
-**Challenges unique to LLMs**:
-- **High variance in outputs**: The same query can get different quality answers. Need more samples.
-- **Subjective quality**: "Better" is hard to define. Use human ratings or LLM-as-judge.
-- **Interleaving**: Show both model outputs side-by-side and let users choose (like Chatbot Arena).
-- **Long-term effects**: Users may adapt their prompting behavior over time.
-
-**Metrics for LLM A/B tests**:
-- Thumbs up/down rate
-- Task completion rate
-- Conversation length (shorter can be better if the answer is found faster)
-- Retry rate (how often users rephrase and ask again)
-- Latency (users abandon slow responses)
-
----
-
-## 10. Interview Questions & Answers
+## 8. Interview Questions & Answers
 
 ### Q1: Why is cross-entropy the standard loss for language models? Derive it from MLE.
 

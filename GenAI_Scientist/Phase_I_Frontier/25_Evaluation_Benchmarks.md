@@ -13,8 +13,7 @@
 10. [LLM-as-a-Judge](#10-llm-as-a-judge)
 11. [Evaluating Specific Capabilities](#11-evaluating-specific-capabilities)
 12. [Benchmark Contamination](#12-benchmark-contamination)
-13. [Building Your Own Evaluation Pipeline](#13-building-your-own-evaluation-pipeline)
-14. [Interview Questions & Answers](#14-interview-questions--answers)
+13. [Interview Questions & Answers](#13-interview-questions--answers)
 
 ---
 
@@ -193,6 +192,50 @@ BLEU-4 = BP × (5/6 × 3/5 × 1/4 × 0/3)^{1/4} = 0  ← any p_n = 0 kills the s
 | **Brittle at sentence level** | Designed for corpus-level, unreliable per-sentence |
 | **Favors short, safe outputs** | Doesn't reward creativity or fluency |
 
+### BLEU Calculation — Full Step-by-Step (BLEU-2)
+
+```
+Reference:  "the cat sat on the mat"   (6 tokens)
+Hypothesis: "the cat sat on a mat"     (6 tokens)
+
+Step 1 — Unigram precision (clipped):
+  Hypothesis unigrams: {the:1, cat:1, sat:1, on:1, a:1, mat:1}
+  Reference  unigrams: {the:2, cat:1, sat:1, on:1, the:2, mat:1}
+
+  Matches (clipped to reference max):
+    the → min(1, 2) = 1  ✓
+    cat → min(1, 1) = 1  ✓
+    sat → min(1, 1) = 1  ✓
+    on  → min(1, 1) = 1  ✓
+    a   → min(1, 0) = 0  ✗  (not in reference)
+    mat → min(1, 1) = 1  ✓
+
+  p₁ = (1+1+1+1+0+1) / 6 = 5/6 ≈ 0.833
+
+Step 2 — Bigram precision (clipped):
+  Hypothesis bigrams: (the,cat), (cat,sat), (sat,on), (on,a), (a,mat)   5 bigrams
+  Reference  bigrams: (the,cat), (cat,sat), (sat,on), (on,the), (the,mat)
+
+  Matches:
+    (the,cat) ✓, (cat,sat) ✓, (sat,on) ✓
+    (on,a) ✗, (a,mat) ✗
+
+  p₂ = 3/5 = 0.600
+
+Step 3 — Brevity Penalty:
+  c = 6 (hypothesis), r = 6 (reference) → c = r → BP = 1.0
+
+Step 4 — BLEU-2:
+  BLEU-2 = BP × (p₁ × p₂)^(1/2)
+          = 1.0 × (0.833 × 0.600)^0.5
+          = 1.0 × (0.500)^0.5
+          = 1.0 × 0.707
+          ≈ 0.707
+
+The one wrong word ("a" instead of "the") drops BLEU-2 from 1.0 to 0.707.
+BLEU-4 would be 0 here (no 4-gram overlap at all from just one wrong word in 6).
+```
+
 ---
 
 ## 4. ROUGE
@@ -248,99 +291,65 @@ ROUGE-1 (recall focus):
   → ROUGE says: "The candidate is missing content" (sat, in, room)
 ```
 
+### ROUGE-L — LCS Worked Example
+
+**Task**: Evaluate a 2-sentence summary.
+
+```
+Reference:  "the cat sat on the mat"
+Candidate:  "the cat on the floor"
+
+Step 1 — Find Longest Common Subsequence (LCS):
+  LCS must be in-order (not necessarily contiguous)
+
+  Reference: the  cat  sat  on  the  mat
+  Candidate: the  cat  on   the floor
+
+  LCS options:
+    "the cat on the" = length 4  ← longest
+    (matches: the[1]↔the[1], cat[2]↔cat[2], on[4]↔on[3], the[5]↔the[4])
+
+  LCS length = 4
+
+Step 2 — Compute Recall and Precision:
+  m = |reference| = 6
+  n = |candidate|  = 5
+
+  R_lcs = LCS / m = 4/6 = 0.667
+  P_lcs = LCS / n = 4/5 = 0.800
+
+Step 3 — F-score (β = 1, equal weight):
+  ROUGE-L = 2 × R × P / (R + P)
+           = 2 × 0.667 × 0.800 / (0.667 + 0.800)
+           = 1.067 / 1.467
+           ≈ 0.727
+
+Compare to ROUGE-1:
+  Matching unigrams: {the, cat, on, the} = 4 matched in reference  
+  ROUGE-1 recall = 4/6 = 0.667  (same as R_lcs here since LCS = token recall)
+  But ROUGE-L also penalizes out-of-order matches; ROUGE-1 doesn't.
+```
+
+**Key insight**: ROUGE-L captures that order matters. A candidate that has all the right words in wrong order scores lower on ROUGE-L than ROUGE-1.
+
 ---
 
 ## 5. METEOR, ChrF & BERTScore
 
 ### METEOR
-
-**METEOR** (Metric for Evaluation of Translation with Explicit ORdering) addresses BLEU's weaknesses:
-
-1. **Alignment**: Find optimal word-to-word alignment using:
-   - Exact match
-   - Stemmed match ("running" ↔ "ran")
-   - Synonym match (via WordNet: "car" ↔ "automobile")
-   - Paraphrase match
-
-2. **Harmonic mean** of precision and recall (recall-weighted):
-
-$$
-F = \frac{10 \cdot P \cdot R}{R + 9P}
-$$
-
-(Weighting recall 9× more than precision.)
-
-3. **Fragmentation penalty**: Penalizes non-contiguous matches:
-
-$$
-\text{Penalty} = 0.5 \times \left(\frac{\text{chunks}}{\text{matched\_unigrams}}\right)^3
-$$
-
-$$
-\text{METEOR} = F \times (1 - \text{Penalty})
-$$
-
-Fewer chunks (more contiguous matches) → lower penalty → higher score.
+- Extends BLEU with stemming + synonym matching (via WordNet) and a fluency penalty for non-contiguous matches
+- Recall-weighted F-score: $F = \frac{10PR}{R + 9P}$, final score multiplied by $(1 - \text{fragmentation penalty})$
+- Correlates better with human judgment than BLEU for translation; rarely asked at depth in MNC interviews
 
 ### ChrF
-
-**ChrF** (Character n-gram F-score) operates at the character level:
-
-$$
-\text{ChrF}\beta = (1 + \beta^2) \cdot \frac{\text{ChrP} \cdot \text{ChrR}}{\beta^2 \cdot \text{ChrP} + \text{ChrR}}
-$$
-
-where ChrP and ChrR are character n-gram precision and recall averaged over $n = 1, \ldots, 6$.
-
-**Advantages**:
-- Robust to morphological variation ("walking" partially matches "walked")
-- No tokenization dependency
-- Works well across languages, especially morphologically rich ones
-- ChrF++ adds word unigrams and bigrams for additional signal
+- Character n-gram F-score (precision + recall at character level, averaged over n=1..6)
+- No tokenization dependency; robust to morphological variation ("walking" partially matches "walked")
+- Useful for morphologically rich languages; standard secondary metric in MT evaluation
 
 ### BERTScore
-
-**BERTScore** uses contextual embeddings to measure semantic similarity:
-
-1. Encode reference and candidate tokens with BERT (or similar)
-2. Compute pairwise cosine similarity between all token pairs
-3. **Greedy matching**: Each token in one sequence matches its most similar token in the other
-
-$$
-R_{\text{BERT}} = \frac{1}{|r|} \sum_{r_i \in r} \max_{c_j \in c} \cos(\mathbf{r}_i, \mathbf{c}_j)
-$$
-
-$$
-P_{\text{BERT}} = \frac{1}{|c|} \sum_{c_j \in c} \max_{r_i \in r} \cos(\mathbf{r}_i, \mathbf{c}_j)
-$$
-
-$$
-F_{\text{BERT}} = 2 \cdot \frac{P_{\text{BERT}} \cdot R_{\text{BERT}}}{P_{\text{BERT}} + R_{\text{BERT}}}
-$$
-
-```
-Reference:  "The automobile drove quickly"
-Candidate:  "The car went fast"
-
-Token similarity matrix (cosine of BERT embeddings):
-              The    car    went   fast
-The          [0.99] [0.12] [0.08] [0.05]
-automobile   [0.10] [0.89] [0.15] [0.11]  ← "automobile" ↔ "car" = 0.89!
-drove        [0.07] [0.18] [0.82] [0.25]  ← "drove" ↔ "went" = 0.82!
-quickly      [0.05] [0.10] [0.22] [0.91]  ← "quickly" ↔ "fast" = 0.91!
-
-BERTScore captures synonymy that BLEU/ROUGE completely miss!
-```
-
-**Advantages over lexical metrics**:
-- Captures synonyms and paraphrases
-- Handles word order flexibility
-- Correlates better with human judgments
-
-**Limitations**:
-- Requires a good encoder model
-- Slower than n-gram metrics
-- Can be gamed by semantically similar but factually different text
+- Encodes reference + candidate with BERT, greedy-matches token embeddings by cosine similarity
+- Captures synonymy: "automobile" ↔ "car" scores ~0.89 cosine — BLEU/ROUGE score 0 for this
+- Better human correlation than n-gram metrics; use when semantic equivalence matters (summarization, paraphrase)
 
 ---
 
@@ -820,87 +829,47 @@ Large $\Delta$ suggests memorization rather than understanding.
 - Several open-source models showed suspiciously high scores that dropped dramatically on rephrased versions
 - This has driven the shift toward **live, human-based evaluation** (Arena) as the most trusted signal
 
----
-
-## 13. Building Your Own Evaluation Pipeline
-
-### When Standard Benchmarks Aren't Enough
-
-For production systems, you need **task-specific evaluation** that measures what actually matters for your use case.
-
-### The Evaluation Stack
+### Contamination — Worked Example (How Train/Test Overlap Inflates Scores)
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   Evaluation Pipeline                    │
-│                                                         │
-│  Layer 1: Unit Tests (Deterministic)                    │
-│  ├── Format compliance (JSON valid, length constraints) │
-│  ├── Keyword presence/absence                           │
-│  ├── Regex pattern matching                             │
-│  └── Citation format validation                         │
-│                                                         │
-│  Layer 2: Automatic Metrics (Statistical)               │
-│  ├── ROUGE/BERTScore against references                 │
-│  ├── Embedding similarity to gold answers               │
-│  └── Factuality via NLI                                 │
-│                                                         │
-│  Layer 3: LLM-as-Judge (Semantic)                       │
-│  ├── Multi-criteria scoring (accuracy, relevance, etc.) │
-│  ├── Pairwise comparison against baseline               │
-│  └── Rubric-guided evaluation                           │
-│                                                         │
-│  Layer 4: Human Evaluation (Gold Standard)              │
-│  ├── Expert review of sampled outputs                   │
-│  ├── A/B testing with real users                        │
-│  └── Failure mode analysis                              │
-│                                                         │
-│  Layer 5: Online Metrics (Production)                   │
-│  ├── User satisfaction (thumbs up/down)                 │
-│  ├── Task completion rate                               │
-│  └── Engagement metrics                                 │
-└─────────────────────────────────────────────────────────┘
+Benchmark: MMLU — "What is the capital of France?"
+Correct answer: "Paris"
 
-Cost:     Low ─────────────────────────────────────► High
-Coverage: Narrow ──────────────────────────────────► Broad
-Speed:    Fast ────────────────────────────────────► Slow
+Scenario A (Clean model):
+  Training data: Wikipedia articles, news (no MMLU examples)
+  Model must reason from general knowledge → 72% accuracy on MMLU
+
+Scenario B (Contaminated model):
+  Training data: Wikipedia + a dataset dump that included MMLU test questions
+  The model saw: "Question: What is the capital of France? Answer: Paris"
+  
+  At eval time, model recognizes the question pattern:
+  "What is the capital of France?" → pattern-matches to training example → "Paris"
+  
+  Result: 91% MMLU accuracy — but 19 points comes from memorization
+
+How to detect:
+  1. Hash the MMLU questions (MD5)
+  2. Compare against all training data document fingerprints
+  3. Find: 8.3% of MMLU questions appear verbatim in training data
+  
+  Controlled experiment:
+    Original MMLU accuracy: 91%
+    Rephrased MMLU ("Name the capital city of France"): 76%
+    Gap = 15 points → strong evidence of contamination
+
+Real example pattern (from research):
+  Model A: MMLU = 88% (training data scraped from web in 2023)
+  Model B: MMLU = 73% (carefully decontaminated training data)
+  Model A's gap vs. rephrased: 14 points → likely contaminated
+  Model B's gap vs. rephrased: 1 point → clean
 ```
 
-### Building a Test Suite
-
-```
-1. Collect representative queries (100-500) across:
-   - Common queries (70%)
-   - Edge cases (15%)
-   - Adversarial/safety tests (10%)
-   - Regression tests from past failures (5%)
-
-2. For each query, define:
-   - Gold answer (if applicable)
-   - Evaluation criteria (per-query or per-category)
-   - Automated checks (format, keywords, constraints)
-   - LLM-judge rubric
-
-3. Run evaluation on every:
-   - Prompt change
-   - Model change
-   - Pipeline change (retrieval, guardrails)
-   - Weekly (for API models that may silently update)
-```
-
-### Regression Testing
-
-Track scores over time to catch degradation:
-
-$$
-\text{Alert if } \frac{\text{Score}_{\text{new}} - \text{Score}_{\text{baseline}}}{\text{Score}_{\text{baseline}}} < -\epsilon
-$$
-
-where $\epsilon$ is your tolerance (e.g., 2% for quality metrics, 0% for safety metrics).
+**Interview answer**: "I'd detect contamination by (1) n-gram matching benchmark questions against training data, (2) measuring performance gap between original and rephrased versions, and (3) using temporal cutoffs — test on data created after the training cutoff date."
 
 ---
 
-## 14. Interview Questions & Answers
+## 13. Interview Questions & Answers
 
 ### Q1: Why is perplexity not sufficient to evaluate LLMs? What are its limitations?
 

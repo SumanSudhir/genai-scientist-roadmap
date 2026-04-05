@@ -19,11 +19,8 @@
 6. [Diffusion Models — The Theory](#6-diffusion-models--the-theory)
 7. [Latent Diffusion & Stable Diffusion](#7-latent-diffusion--stable-diffusion)
 8. [Controlling Image Generation](#8-controlling-image-generation)
-9. [Video Generation Models](#9-video-generation-models)
-10. [Audio & Speech Models](#10-audio--speech-models)
-11. [Multimodal Embeddings & Retrieval](#11-multimodal-embeddings--retrieval)
-12. [Cross-Modal Attention Patterns](#12-cross-modal-attention-patterns)
-13. [Interview Questions & Answers](#13-interview-questions--answers)
+9. [Multimodal Embeddings & Retrieval](#9-multimodal-embeddings--retrieval)
+10. [Interview Questions & Answers](#10-interview-questions--answers)
 
 ---
 
@@ -172,6 +169,35 @@ Prediction: "dog"
 4. **Robust representations**: CLIP embeddings transfer well across domains, styles, and distributions
 5. **Enabled text-to-image generation**: CLIP's text encoder provides the semantic understanding that guides image generation in DALL-E and Stable Diffusion
 
+### 2.8 CLIP Training — What the Loss Actually Does (N=4 Example)
+
+Suppose a batch has 4 image-text pairs. The model produces 8 embeddings (4 image, 4 text) and computes an N×N similarity matrix:
+
+```
+Batch: (cat photo, "a photo of a cat")
+       (dog photo, "a photo of a dog")
+       (car photo, "a photo of a car")
+       (bird photo, "a photo of a bird")
+
+Similarity matrix (cosine, before temperature scaling):
+
+             "cat"  "dog"  "car"  "bird"
+cat image  [  0.92   0.21   0.08   0.15 ]  ← row sum → softmax → maximize [0,0]
+dog image  [  0.18   0.87   0.12   0.20 ]  ← maximize [1,1]
+car image  [  0.09   0.14   0.90   0.11 ]  ← maximize [2,2]
+bird image [  0.13   0.19   0.10   0.88 ]  ← maximize [3,3]
+
+Temperature τ = 0.07 (sharpens the distribution):
+  scaled score for (cat image, "cat" text) = 0.92 / 0.07 = 13.14
+  scaled score for (cat image, "dog" text) = 0.21 / 0.07 = 3.00
+
+softmax row 0: [0.9997, 0.0001, 0.0000, 0.0002]  → loss ≈ -log(0.9997) ≈ 0.0003
+```
+
+**Gradient signal**: Off-diagonal cells pull representations apart. With N=32,768 (large batches in practice), each image has 32,767 negatives — extremely hard negatives from random internet images force very precise alignment.
+
+**Key insight**: The batch IS the negative bank. Larger batches → more informative training signal. CLIP used batch sizes up to 32,768.
+
 ---
 
 ## 3. Vision Transformers (ViT) — Images as Token Sequences
@@ -230,6 +256,47 @@ ViT provides a **universal architecture** for both text and images. Both are pro
 - CLIP's image encoder is a ViT
 - LLaVA connects a ViT to an LLM
 - Multimodal models can share transformer layers across modalities
+
+### 3.5 Patch Tokenization — Worked Example (224×224 Image)
+
+```
+Input image: 224 × 224 × 3 (RGB)
+
+Step 1 — Divide into patches (patch_size = 16):
+  Grid: 224/16 = 14 rows × 14 columns = 196 patches
+
+  ┌──────────────────────────────┐
+  │ P(0,0)  P(0,1) ... P(0,13)  │  ← row 0
+  │ P(1,0)  P(1,1) ... P(1,13)  │  ← row 1
+  │  ...                         │
+  │ P(13,0) ...    ... P(13,13) │  ← row 13
+  └──────────────────────────────┘
+
+Step 2 — Flatten each patch:
+  Each patch: 16 × 16 × 3 = 768 values → vector x_i ∈ ℝ^768
+
+Step 3 — Linear projection:
+  x_i ──► E·x_i  where E ∈ ℝ^(d_model × 768), d_model = 768 for ViT-B
+
+Step 4 — Add [CLS] token + positional embeddings:
+  Sequence: [[CLS], P(0,0), P(0,1), ..., P(13,13)]
+  Length: 1 + 196 = 197 tokens
+
+  Position embedding added: p_i ∈ ℝ^768 (learned, one per position 0..196)
+
+Step 5 — Feed 197 tokens into 12-layer transformer encoder
+
+Final output:
+  [CLS] token vector → MLP head → class logits (ImageNet: 1000 classes)
+  Other 196 tokens   → spatial features (used in detection, dense prediction)
+```
+
+**Parameter count for patch embedding layer**:
+- Linear projection E: 768 × 768 = 589,824 params
+- Position embeddings: 197 × 768 = 151,296 params
+- Total patch embedding: ~741K params (small vs 85M total for ViT-B)
+
+**Why 14×14 = 196, not 224/16 = 14 exactly?** It is exactly 14. 224 = 14 × 16. This is why ViT image sizes must be divisible by patch_size.
 
 ---
 
@@ -307,7 +374,40 @@ This enabled creating high-quality visual instruction data without expensive hum
 | LLaVA 1.5 | CLIP ViT-L/14@336 | 336×336 | Vicuna 7B/13B | MLP projection, higher res |
 | LLaVA 1.6 (NeXT) | CLIP ViT-L/14 | Dynamic (up to 672×672) | Mistral/Llama 3 | Dynamic resolution, multi-image |
 
-### 4.5 The General VLM Architecture Pattern
+### 4.5 LLaVA Architecture — Step-by-Step Token Flow
+
+```
+Input: Image (336×336) + Text: "Describe this image in detail."
+
+Step 1 — Vision encoding:
+  336×336 image → CLIP ViT-L/14@336
+  Patches: 336/14 = 24 × 24 = 576 patches
+  ViT output: 576 visual feature vectors, each ∈ ℝ^1024 (ViT-L hidden dim)
+
+Step 2 — Projection (MLP):
+  576 × ℝ^1024 ──► MLP ──► 576 × ℝ^4096  (Llama-2-7B embedding dim)
+  This MLP has ~4M params (1024 → 4096, two layers)
+  Now visual features "speak the LLM's language"
+
+Step 3 — Text tokenization:
+  "Describe this image in detail." → [17271, 445, 2793, 304, 9493, 29889]
+  → embed → 6 × ℝ^4096
+
+Step 4 — Concatenation:
+  Input to LLM = [visual tokens (576)] + [text tokens (6)]
+               = 582 tokens × ℝ^4096
+
+Step 5 — Autoregressive generation (LLM):
+  [visual₁...visual₅₇₆, text₁...text₆, →] generate next token
+  The LLM attends to ALL 582 tokens when generating each output token
+
+Step 6 — Output:
+  "The image shows a golden retriever running through a park..."
+```
+
+**Memory note**: 576 visual tokens per image means a conversation with 10 images = 5,760 visual tokens just for images. This is why higher-resolution variants (LLaVA 1.6) use tiling strategies to reduce token count.
+
+### 4.6 The General VLM Architecture Pattern
 
 LLaVA established a pattern that most Vision-Language Models (VLMs) follow:
 
@@ -697,133 +797,7 @@ This allows "style transfer" controlled by both a text prompt and a reference im
 
 ---
 
-## 9. Video Generation Models
-
-### 9.1 Sora (OpenAI, 2024)
-
-Sora is the most prominent video generation model, generating up to 60 seconds of high-fidelity video from text prompts.
-
-**Architecture** (based on public information):
-- **Diffusion Transformer (DiT)** operating in a video latent space
-- Video is encoded into **spacetime patches** — 3D patches that span spatial and temporal dimensions
-- The transformer processes these patches as a sequence, similar to how ViT processes image patches
-
-```
-Video (T frames × H × W × 3)
-       │
-       ▼
-Video Encoder (compress spatially + temporally)
-       │
-       ▼
-Spacetime latent patches (sequence of tokens)
-       │
-       ▼
-DiT (Diffusion Transformer)
-  - Self-attention across all spacetime patches
-  - Cross-attention with text conditioning
-  - Iterative denoising
-       │
-       ▼
-Video Decoder
-       │
-       ▼
-Generated video
-```
-
-**Key properties**:
-- Variable resolution and duration (not fixed to specific sizes)
-- Temporal consistency: objects maintain identity across frames
-- Physics understanding: basic physics simulation (water, reflections, motion)
-
-### 9.2 Other Video Models
-
-| Model | Approach | Duration | Key Feature |
-|-------|---------|----------|-------------|
-| **Sora** (OpenAI) | DiT, spacetime patches | Up to 60s | Highest quality, physical understanding |
-| **Runway Gen-3** | Diffusion-based | ~10s | Production-ready, fast |
-| **Pika** | Diffusion-based | ~4s | Easy to use, motion control |
-| **Stable Video Diffusion** | Latent diffusion + temporal layers | ~4s | Open-source |
-| **Kling** (Kuaishou) | DiT-like | ~10s | Strong motion, Chinese origin |
-
-### 9.3 Challenges in Video Generation
-
-1. **Temporal consistency**: Objects shouldn't change appearance between frames (identity preservation)
-2. **Physics**: Water should flow, objects should fall, shadows should be consistent
-3. **Compute**: A 10-second 24fps video at 1080p = 240 frames × 1920 × 1080 pixels — enormous latent space
-4. **Long-range coherence**: Maintaining a narrative over 60 seconds requires understanding causality
-5. **Evaluation**: No standard metrics for video quality (FVD is imperfect)
-
----
-
-## 10. Audio & Speech Models
-
-### 10.1 Whisper — Speech Recognition
-
-**Whisper** (Radford et al., 2023) is OpenAI's speech recognition model. It's an **encoder-decoder transformer** trained on 680,000 hours of multilingual audio.
-
-**Architecture**:
-
-```
-Audio waveform ──► Mel spectrogram ──► Encoder (Transformer) ──► Audio features
-                                                                      │
-                                                               Cross-attention
-                                                                      │
-                               Text output ◄── Decoder (Transformer) ──┘
-```
-
-1. **Audio preprocessing**: Convert waveform to 80-channel log-mel spectrogram
-2. **Encoder**: Transformer with convolutional downsampling (2 conv layers → 2× time reduction)
-3. **Decoder**: Autoregressive transformer that generates text tokens, cross-attending to encoder
-4. **Multi-task**: Single model handles transcription, translation, language detection, timestamp prediction
-
-**Whisper model sizes**:
-
-| Model | Params | Layers | $d$ | Heads | WER (en) |
-|-------|--------|--------|-----|-------|----------|
-| Tiny | 39M | 4 enc + 4 dec | 384 | 6 | ~7.7% |
-| Base | 74M | 6 + 6 | 512 | 8 | ~5.0% |
-| Small | 244M | 12 + 12 | 768 | 12 | ~3.4% |
-| Medium | 769M | 24 + 24 | 1024 | 16 | ~2.9% |
-| Large-v3 | 1.5B | 32 + 32 | 1280 | 20 | ~2.0% |
-
-**Why Whisper matters**: Robust across accents, noise levels, and languages. Open-source. Established encoder-decoder transformer as the standard ASR architecture.
-
-### 10.2 Text-to-Speech (TTS)
-
-Modern TTS generates natural-sounding speech from text:
-
-| Model | Approach | Key Feature |
-|-------|---------|-------------|
-| **VALL-E** (Microsoft, 2023) | Neural codec LM | Clone any voice from 3-second sample |
-| **Bark** (Suno) | GPT-like autoregressive | Music, sound effects, multilingual |
-| **XTTS** (Coqui) | GPT-2 + DVAE | Open-source, cross-lingual voice cloning |
-| **StyleTTS 2** | Diffusion-based | Studio-quality, style control |
-| **Parler TTS** | Text-described style | "A female speaker with a warm tone..." |
-
-**VALL-E architecture**:
-
-$$
-\text{Text} + \text{3s voice sample} \xrightarrow{\text{Neural codec LM}} \text{Audio codec tokens} \xrightarrow{\text{Codec decoder}} \text{Speech}
-$$
-
-1. Audio is tokenized using a neural codec (EnCodec) into discrete tokens
-2. A transformer language model generates audio tokens conditioned on text + voice prompt
-3. The codec decoder converts tokens back to audio waveform
-
-This frames TTS as a **language modeling problem** — generate audio tokens the same way we generate text tokens.
-
-### 10.3 Audio Understanding
-
-| Model | Task | Approach |
-|-------|------|---------|
-| **AudioLM** (Google) | Audio continuation | Predict next audio tokens |
-| **MusicLM** (Google) | Text-to-music | Hierarchical music generation |
-| **Suno** | Text-to-song (vocals + music) | Multi-stage generation |
-| **Qwen-Audio** | Audio understanding (QA, classification) | Audio encoder + LLM |
-
----
-
-## 11. Multimodal Embeddings & Retrieval
+## 9. Multimodal Embeddings & Retrieval
 
 ### 11.1 Shared Embedding Spaces
 
@@ -888,86 +862,7 @@ Answer grounded in the actual chart
 
 ---
 
-## 12. Cross-Modal Attention Patterns
-
-### 12.1 How Modalities Interact in Transformers
-
-Different architectures use different attention patterns to combine modalities:
-
-### 12.2 Pattern 1: Early Fusion
-
-All modalities are tokenized and concatenated into a single sequence. Standard self-attention processes everything together.
-
-$$
-\text{Input} = [\text{text tokens}; \text{visual tokens}; \text{audio tokens}]
-$$
-
-```
-[text₁] [text₂] [img₁] [img₂] [img₃] [audio₁] [audio₂]
-   ↕       ↕       ↕       ↕       ↕       ↕        ↕
-        Full self-attention across all tokens
-```
-
-**Used by**: GPT-4o (likely), Gemini, Fuyu
-
-**Advantage**: Maximum cross-modal interaction — any token can attend to any other.
-**Disadvantage**: Quadratic cost in total sequence length (all modalities combined).
-
-### 12.3 Pattern 2: Cross-Attention Fusion
-
-Separate encoders for each modality, connected via cross-attention:
-
-```
-Image ──► Vision Encoder ──► K, V (visual features)
-                                    │
-                              Cross-attention
-                                    │
-Text  ──► Text Encoder ──► Q ──────►+ ──► Fused representation
-```
-
-**Used by**: Stable Diffusion (text → image cross-attention), Whisper (audio → text cross-attention), Flamingo
-
-**Advantage**: Modality-specific encoders can be optimized independently.
-**Disadvantage**: Cross-modal interaction limited to cross-attention layers.
-
-### 12.4 Pattern 3: Projection + Concatenation (Late Fusion)
-
-Encode each modality independently, project to a shared dimension, concatenate, then process with a shared model:
-
-$$
-\mathbf{H} = [\text{Proj}_{\text{vis}}(f_{\text{vis}}(\text{img})); \text{Proj}_{\text{text}}(f_{\text{text}}(\text{txt}))]
-$$
-
-**Used by**: LLaVA (project visual features into LLM embedding space)
-
-**Advantage**: Can leverage pretrained unimodal encoders. Simple.
-**Disadvantage**: Visual and text tokens don't interact until the shared model.
-
-### 12.5 Pattern 4: Perceiver / Resampler
-
-Use a fixed number of **learnable query tokens** to attend to variable-length modality features:
-
-$$
-\text{Queries (learned, fixed count)} \xrightarrow{\text{cross-attend}} \text{Visual features (variable count)} \to \text{Fixed visual tokens}
-$$
-
-**Used by**: Flamingo (Perceiver Resampler), Qwen-VL, Idefics 2
-
-**Advantage**: Controls the number of visual tokens fed to the LLM (e.g., compress 576 ViT tokens to 64 query tokens). Reduces compute.
-**Disadvantage**: Information compression may lose detail.
-
-### 12.6 Comparison
-
-| Pattern | Cross-Modal Depth | Compute | Flexibility | Example |
-|---------|------------------|---------|-------------|---------|
-| Early Fusion | Deep (all layers) | High | Low (fixed) | GPT-4o |
-| Cross-Attention | Medium (at cross-attn layers) | Medium | High | Stable Diffusion |
-| Projection + Concat | Shallow (after projection) | Low | High | LLaVA |
-| Perceiver | Controlled | Configurable | High | Flamingo |
-
----
-
-## 13. Interview Questions & Answers
+## 10. Interview Questions & Answers
 
 ### Q1: How does CLIP align images and text? What is contrastive learning?
 

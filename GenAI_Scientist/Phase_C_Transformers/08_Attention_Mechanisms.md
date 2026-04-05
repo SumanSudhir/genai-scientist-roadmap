@@ -19,11 +19,10 @@
 6. [Multi-Head Attention](#6-multi-head-attention)
 7. [Cross-Attention](#7-cross-attention)
 8. [Causal (Masked) Attention](#8-causal-masked-attention)
-9. [Attention as Soft Dictionary Lookup](#9-attention-as-soft-dictionary-lookup)
-10. [Computational Complexity of Attention](#10-computational-complexity-of-attention)
-11. [Modern Attention Variants](#11-modern-attention-variants)
-12. [What Attention Heads Actually Learn](#12-what-attention-heads-actually-learn)
-13. [Interview Questions & Answers](#13-interview-questions--answers)
+9. [Computational Complexity of Attention](#9-computational-complexity-of-attention)
+10. [Modern Attention Variants](#10-modern-attention-variants)
+11. [What Attention Heads Actually Learn](#11-what-attention-heads-actually-learn)
+12. [Interview Questions & Answers](#12-interview-questions--answers)
 
 ---
 
@@ -120,6 +119,26 @@ The decoder state and encoder state are mapped to a common space and **added** t
 
 **Computational cost**: Requires a full forward pass through this small network for every (decoder position, encoder position) pair. For output length $T_{\text{out}}$ and input length $T_{\text{in}}$, that's $T_{\text{out}} \times T_{\text{in}}$ evaluations.
 
+### 2.4 Visualizing Alignment
+
+One of the most compelling results from Bahdanau et al. was plotting attention weights $\alpha_{t,i}$ as a heatmap. Each **row** = one decoder step (output word being generated), each **column** = one encoder position (input word).
+
+```
+Translating: "Le chat est sur le tapis" → "The cat is on the mat"
+
+              Le    chat   est   sur    le   tapis
+         The [0.85  0.05  0.04  0.03   0.02  0.01]   ← "The" mostly attends to "Le"
+         cat [0.04  0.88  0.03  0.02   0.02  0.01]   ← "cat" strongly attends to "chat"
+          is [0.02  0.03  0.87  0.04   0.02  0.02]   ← "is"  strongly attends to "est"
+          on [0.01  0.02  0.03  0.88   0.04  0.02]   ← "on"  strongly attends to "sur"
+         the [0.02  0.02  0.02  0.04   0.85  0.05]   ← "the" strongly attends to "le"
+         mat [0.01  0.01  0.02  0.03   0.05  0.88]   ← "mat" strongly attends to "tapis"
+```
+
+The near-diagonal pattern emerges **without ever being told** about word alignment — the model learned it purely from translation data. For language pairs with different word order (German-English), the learned pattern is non-monotonic but still shows correct cross-lingual alignments.
+
+This was stunning in 2015: a neural network learning interpretable, linguistically meaningful alignment as a byproduct of training to minimize translation loss.
+
 ---
 
 ## 3. Luong Attention (Multiplicative)
@@ -203,6 +222,29 @@ Information path length:
   Self-Attention: O(1)     — token 1 directly attends to token n
   CNN:            O(log_k(n)) — depends on kernel size and number of layers
 ```
+
+### 4.4 Visualizing Self-Attention
+
+Consider: **"The animal didn't cross the street because it was too tired."**
+
+A simplified view of what a **coreference-resolving** attention head might learn for the token "it":
+
+```
+              The  animal  didn't  cross  street  because   it   was  tired
+     The    [ 0.5    0.1     0.0    0.1     0.1     0.0    0.1   0.0   0.1 ]
+  animal    [ 0.1    0.5     0.0    0.1     0.0     0.0    0.2   0.0   0.1 ]
+  didn't    [ 0.1    0.1     0.4    0.2     0.1     0.0    0.0   0.0   0.1 ]
+   cross    [ 0.1    0.1     0.1    0.4     0.2     0.1    0.0   0.0   0.0 ]
+  street    [ 0.1    0.0     0.1    0.2     0.4     0.1    0.0   0.0   0.1 ]
+ because    [ 0.1    0.1     0.1    0.1     0.1     0.4    0.0   0.0   0.1 ]
+      it    [ 0.0    0.7     0.0    0.0     0.1     0.0    0.2   0.0   0.0 ]  ← "it" → "animal"
+     was    [ 0.0    0.1     0.1    0.0     0.0     0.1    0.3   0.4   0.0 ]
+   tired    [ 0.0    0.1     0.0    0.0     0.0     0.1    0.3   0.1   0.4 ]
+```
+
+Look at the row for **"it"**: attention weight **0.70 on "animal"**. This is how the model resolves the pronoun — the output representation of "it" after this layer is a blend dominated by "animal"'s value vector. When the FFN layer processes "it" in the next step, it is effectively processing something that **knows it refers to the animal**.
+
+No explicit coreference annotation was given — this pattern emerges purely from the model learning to predict text. This is self-attention's most profound capability: building context-aware representations where a word's meaning is shaped by every word it attends to.
 
 ---
 
@@ -328,6 +370,75 @@ softmax: (B, T, T)
 
 The $(B, T, T)$ attention matrix is the memory bottleneck. For $T = 4096$ and $B = 32$ in FP16: $32 \times 4096 \times 4096 \times 2$ bytes = 1 GB just for one attention layer's scores. With 32 layers, that's 32 GB. This is why long sequences are so expensive.
 
+### 5.5 Concrete Numerical Walkthrough
+
+To make the formula tangible, let's trace through attention on **"I love Paris"** with $d_k = 2$ (toy numbers — real models use $d_k = 64$ or 128).
+
+**Given Q, K, V after projection** (made up for illustration):
+
+$$Q = \begin{bmatrix} 1 & 0 \\ 1 & 1 \\ 0 & 1 \end{bmatrix}, \quad K = \begin{bmatrix} 1 & 0 \\ 1 & 1 \\ 0 & 1 \end{bmatrix}, \quad V = \begin{bmatrix} 1 & 0 & 0 \\ 0 & 1 & 0 \\ 0 & 0 & 1 \end{bmatrix}$$
+
+Rows = tokens: "I" (row 0), "love" (row 1), "Paris" (row 2). $V$ is set as an identity matrix so the output is easy to read: output[i][j] = how much token $i$ borrows from token $j$.
+
+---
+
+**Step 1 — Raw scores** $S = QK^T$:
+
+$$S_{ij} = \mathbf{q}_i \cdot \mathbf{k}_j$$
+
+$$S = \begin{bmatrix}
+1{\cdot}1 + 0{\cdot}0 & 1{\cdot}1 + 0{\cdot}1 & 1{\cdot}0 + 0{\cdot}1 \\
+1{\cdot}1 + 1{\cdot}0 & 1{\cdot}1 + 1{\cdot}1 & 1{\cdot}0 + 1{\cdot}1 \\
+0{\cdot}1 + 1{\cdot}0 & 0{\cdot}1 + 1{\cdot}1 & 0{\cdot}0 + 1{\cdot}1
+\end{bmatrix} = \begin{bmatrix} 1 & 1 & 0 \\ 1 & 2 & 1 \\ 0 & 1 & 1 \end{bmatrix}$$
+
+**Reading $S$**: Entry $S_{10} = 1$, $S_{11} = 2$, $S_{12} = 1$ — "love"'s query $[1,1]$ most strongly matches its own key $[1,1]$ (dot product = 2). "I"'s query $[1,0]$ scores 0 against "Paris" whose key is $[0,1]$ — orthogonal vectors, no similarity.
+
+---
+
+**Step 2 — Scale** by $\sqrt{d_k} = \sqrt{2} \approx 1.41$:
+
+$$S_{\text{scaled}} = \begin{bmatrix} 0.71 & 0.71 & 0.00 \\ 0.71 & 1.41 & 0.71 \\ 0.00 & 0.71 & 0.71 \end{bmatrix}$$
+
+Without this step, the scores stay as integers 0, 1, 2. For $d_k = 64$, dot products would be in the range $[-8, +8]$, pushing softmax toward near-one-hot outputs and killing gradients.
+
+---
+
+**Step 3 — Softmax** (applied row-wise):
+
+$$\text{Row 0 (I):} \quad \frac{e^{0.71},\ e^{0.71},\ e^{0}}{e^{0.71}+e^{0.71}+e^{0}} = \frac{2.03,\ 2.03,\ 1.00}{5.06} = [0.40,\ 0.40,\ 0.20]$$
+
+$$\text{Row 1 (love):} \quad \frac{e^{0.71},\ e^{1.41},\ e^{0.71}}{e^{0.71}+e^{1.41}+e^{0.71}} = \frac{2.03,\ 4.10,\ 2.03}{8.16} = [0.25,\ 0.50,\ 0.25]$$
+
+$$\text{Row 2 (Paris):} \quad \frac{e^{0},\ e^{0.71},\ e^{0.71}}{e^{0}+e^{0.71}+e^{0.71}} = \frac{1.00,\ 2.03,\ 2.03}{5.06} = [0.20,\ 0.40,\ 0.40]$$
+
+$$A = \begin{bmatrix} 0.40 & 0.40 & 0.20 \\ 0.25 & 0.50 & 0.25 \\ 0.20 & 0.40 & 0.40 \end{bmatrix}$$
+
+**Reading $A$** (each row sums to 1):
+- **"I"** splits attention roughly: 40% on itself, 40% on "love", 20% on "Paris"
+- **"love"** focuses mostly on itself (50%), splits evenly to neighbors (25% each)
+- **"Paris"** ignores "I" mostly (20%), splits equally between "love" and itself (40% each)
+
+---
+
+**Step 4 — Output** $= AV$:
+
+Since $V$ is identity, the output is just the attention matrix $A$ itself:
+
+$$\text{Output} = AV = \begin{bmatrix} 0.40 & 0.40 & 0.20 \\ 0.25 & 0.50 & 0.25 \\ 0.20 & 0.40 & 0.40 \end{bmatrix}$$
+
+Each row is the **new contextualized representation** of that token:
+
+```
+"I"     → [0.40, 0.40, 0.20]  — blends itself, "love", "Paris"
+"love"  → [0.25, 0.50, 0.25]  — mostly itself, slight awareness of context
+"Paris" → [0.20, 0.40, 0.40]  — leans toward "love" (the verb governing it)
+```
+
+**The key insight**: "Paris" is no longer just its original embedding. Its representation now carries 40% information from "love" — making it aware of its grammatical role as the object of "love". This is **contextualization**: the same word gets different representations depending on the context it appears in.
+
+Compare: "Paris" in "I love Paris" vs "Paris is cold" — the attention would pull in different context, giving different output representations, which is exactly what we want for downstream tasks.
+
 ---
 
 ## 6. Multi-Head Attention
@@ -397,6 +508,40 @@ Multi-head attention has the **same parameter count** as single-head attention w
 | Llama 2 70B | 8192 | 64 | 128 |
 
 Note: $d_k = 64$ or 128 is nearly universal. When models grow larger, they add more heads (not bigger heads).
+
+### 6.6 Two Heads, Two Perspectives
+
+The same sentence, processed by two different heads simultaneously. Consider: **"The cat sat on the mat"**
+
+**Head 1 — Syntactic (subject tracking)**:
+```
+         The   cat   sat    on   the   mat
+   The [ 0.5   0.4   0.0   0.0   0.1   0.0 ]
+   cat [ 0.2   0.6   0.1   0.0   0.1   0.0 ]
+   sat [ 0.1   0.5   0.2   0.1   0.1   0.0 ]  ← "sat" attends to "cat" (its subject)
+    on [ 0.1   0.1   0.1   0.4   0.2   0.1 ]
+   the [ 0.2   0.1   0.0   0.1   0.5   0.1 ]
+   mat [ 0.1   0.1   0.0   0.2   0.4   0.2 ]
+```
+
+**Head 2 — Positional (previous token)**:
+```
+         The   cat   sat    on   the   mat
+   The [ 1.0   0.0   0.0   0.0   0.0   0.0 ]
+   cat [ 0.9   0.1   0.0   0.0   0.0   0.0 ]  ← "cat" attends mostly to "The"
+   sat [ 0.0   0.9   0.1   0.0   0.0   0.0 ]  ← "sat" attends mostly to "cat"
+    on [ 0.0   0.0   0.9   0.1   0.0   0.0 ]
+   the [ 0.0   0.0   0.0   0.9   0.1   0.0 ]
+   mat [ 0.0   0.0   0.0   0.0   0.9   0.1 ]
+```
+
+Neither pattern is programmed — both **emerge from training**:
+- Head 1 learned that verbs should look at their subjects (useful for understanding grammar)
+- Head 2 learned a simple bigram pattern (look left — useful for language modeling)
+
+The output projection $W_O$ then combines both heads' outputs: the final representation of "sat" carries both its subject identity (from Head 1: "the cat is the subject") and its local context (from Head 2: "it follows 'cat'").
+
+This is why splitting into multiple heads is useful — a single head would have to choose between these two patterns, or blend them into a compromised average that captures neither well.
 
 ---
 
@@ -554,64 +699,9 @@ A =  [ a21  a22   0    0  ]     Each position sees only past + self
 
 ---
 
-## 9. Attention as Soft Dictionary Lookup
+## 9. Computational Complexity of Attention
 
-This is the most useful intuitive framework for understanding what attention does.
-
-### 9.1 Hard Dictionary Lookup
-
-A traditional dictionary maps a query to exactly one value:
-```
-dictionary = {"cat": 0.8, "dog": 0.6, "fish": 0.3}
-lookup("cat") -> 0.8     (exact match)
-lookup("kitten") -> ERROR (key not found)
-```
-
-### 9.2 Soft (Differentiable) Dictionary Lookup
-
-Attention is a **soft** dictionary where:
-1. The query doesn't need to exactly match any key
-2. The result is a weighted combination of ALL values
-3. Weights are determined by how well the query matches each key
-
-```
-Query:  "kitten"
-Keys:   ["cat", "dog", "fish"]
-Values: [v_cat, v_dog, v_fish]
-
-Similarity("kitten", "cat")  = 0.85  -> weight = 0.70
-Similarity("kitten", "dog")  = 0.40  -> weight = 0.20
-Similarity("kitten", "fish") = 0.10  -> weight = 0.10
-
-Result = 0.70 * v_cat + 0.20 * v_dog + 0.10 * v_fish
-```
-
-### 9.3 Mapping to the Attention Formula
-
-$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
-
-$\text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)$ = weights from query-key similarity
-
-$V$ = values to combine
-
-$$\text{result}_i = \sum_j w_{ij} \cdot \mathbf{v}_j = \text{weighted average of values}$$
-
-Each position's output is a "soft retrieval" from all other positions, where the retrieval is based on the learned Q-K similarity.
-
-### 9.4 Why This Framework Is Powerful
-
-It explains many things at once:
-
-- **Why attention is permutation-equivariant**: The dictionary lookup depends on content (Q, K), not position. (Position is added separately via positional encodings.)
-- **Why attention can handle variable lengths**: Dictionaries can have any number of entries.
-- **Why KV caching works for generation**: The "dictionary" (K, V) grows by one entry at each step. Old entries don't change.
-- **Why RAG works**: Retrieval is literally a dictionary lookup — find the most relevant documents (keys) and use their content (values).
-
----
-
-## 10. Computational Complexity of Attention
-
-### 10.1 Time Complexity
+### 9.1 Time Complexity
 
 For sequence length $T$ and head dimension $d_k$:
 
@@ -623,7 +713,7 @@ Attention $\times V$: $O(T^2 \cdot d_v)$ — $T$ outputs, each a weighted sum of
 
 Total: $O(T^2 \cdot d)$ — quadratic in sequence length
 
-### 10.2 Memory Complexity
+### 9.2 Memory Complexity
 
 The attention score matrix is $(T \times T)$ per head per layer.
 
@@ -639,7 +729,7 @@ $$\text{Attention matrices alone: } 80 \times 64 \times 4096^2 \times 2 \text{ b
 
 This is why long context is so expensive and why efficient attention variants (Section 11) are essential.
 
-### 10.3 The Quadratic Bottleneck
+### 9.3 The Quadratic Bottleneck
 
 ```
 T=512:    T^2 = 262K        (manageable)
@@ -654,25 +744,13 @@ The quadratic scaling means:
 - Going from 2K to 128K context -> 4096x more attention compute
 - This is the fundamental limit of standard transformer attention
 
-### 10.4 Attention vs Other Components
-
-In a transformer layer, attention is not the only compute:
-
-```
-Component          Compute              Memory
-Attention          O(T^2 * d)           O(T^2) for score matrix
-Feed-Forward       O(T * d * 4d)        O(T * 4d) for activations
-```
-
-For small $T$, the FFN dominates (since $4d \gg T$). For large $T$, attention dominates (since $T^2 \gg 4d$). The crossover is around $T \approx 4d$ (e.g., $T \approx 16384$ for $d = 4096$).
-
 ---
 
-## 11. Modern Attention Variants
+## 10. Modern Attention Variants
 
 Research has produced many variants to make attention faster, more memory-efficient, or more capable.
 
-### 11.1 Multi-Query Attention (MQA)
+### 10.1 Multi-Query Attention (MQA)
 
 **Paper**: "Fast Transformer Decoding" (Shazeer, 2019)
 
@@ -689,7 +767,7 @@ Multi-Query:      h separate Q, 1 shared K, 1 shared V -> h * d_model * d_k + 2 
 
 **Used by**: PaLM, Falcon.
 
-### 11.2 Grouped-Query Attention (GQA)
+### 10.2 Grouped-Query Attention (GQA)
 
 **Paper**: "GQA: Training Generalized Multi-Query Attention from Multi-Head Checkpoints" (Ainslie et al., 2023)
 
@@ -705,7 +783,7 @@ GQA:   G = h/g   (g heads share K, V)           — balanced quality and efficie
 
 **Why GQA matters**: It's the standard for large models now. It provides near-MHA quality with near-MQA efficiency. You can even convert an MHA-trained model to GQA by mean-pooling KV projections within groups.
 
-### 11.3 Flash Attention
+### 10.3 Flash Attention
 
 **Paper**: "FlashAttention: Fast and Memory-Efficient Exact Attention" (Dao et al., 2022)
 
@@ -736,7 +814,7 @@ GQA:   G = h/g   (g heads share K, V)           — balanced quality and efficie
 
 **Flash Attention 3** (2024): Exploits Hopper GPU features (asynchronous execution, FP8).
 
-### 11.4 Sliding Window Attention
+### 10.4 Sliding Window Attention
 
 **Used by**: Mistral 7B
 
@@ -755,37 +833,11 @@ For $W = 4096$ and $T = 32768$, this is 8x cheaper.
 
 With $L = 32$ layers and $W = 4096$: effective range = 131,072 tokens. Information propagates across layers, similar to how stacked CNN layers build large receptive fields.
 
-### 11.5 Sparse Attention Patterns
-
-Various methods reduce attention from full $O(T^2)$ to sparser patterns:
-
-**Local attention**: Only attend to nearby tokens (like sliding window).
-
-**Strided attention**: Attend to every k-th token globally plus local context (Sparse Transformer, Child et al. 2019).
-
-**Longformer**: Combination of sliding window (local) + global tokens (selected positions attend to everything). $O(T)$ complexity.
-
-**BigBird**: Random + window + global attention. Theoretically proven to be a universal approximator.
-
-### 11.6 Linear Attention
-
-Replace softmax attention with a kernel approximation that allows computation in $O(T \cdot d^2)$ instead of $O(T^2 \cdot d)$:
-
-Standard: $\text{softmax}(QK^T)V$ — must compute $T \times T$ matrix
-
-Linear: $\phi(Q)(\phi(K)^T V)$ — compute $(d \times d)$ matrix first, then multiply with $Q$
-
-By changing the order of operations (using associativity of matrix multiplication), the inner dimension changes from $T$ to $d$. Since $d \ll T$ for long sequences, this is much cheaper.
-
-**Variants**: Linear Transformer, RWKV, RetNet.
-
-**Trade-off**: Quality degradation compared to softmax attention. The softmax nonlinearity is important for sharp, selective attention patterns. Linear attention tends to produce more diffuse (spread-out) attention.
-
 ---
 
-## 12. What Attention Heads Actually Learn
+## 11. What Attention Heads Actually Learn
 
-### 12.1 Empirical Findings
+### 11.1 Empirical Findings
 
 Research on interpreting attention heads (Clark et al. 2019, Voita et al. 2019) has revealed that different heads specialize:
 
@@ -808,29 +860,9 @@ Research on interpreting attention heads (Clark et al. 2019, Voita et al. 2019) 
 - An **induction head** implements the pattern: if sequence A B ... A appeared, predict B after the second A
 - They compose two heads: one that looks at the previous token, and one that finds where that token appeared before
 
-### 12.2 Not All Heads Are Important
-
-Pruning studies show that many attention heads can be removed with minimal performance impact:
-
-- Michel et al. (2019): In BERT, up to 40% of heads can be pruned without significant accuracy loss
-- Some heads are critical (removing them tanks performance), but many are redundant
-- This finding motivated efficient architectures with fewer KV heads (MQA, GQA)
-
-### 12.3 Attention ≠ Explanation
-
-A common temptation is to use attention weights as "explanations" — if the model attends to a word, it must be important for the prediction. But this is unreliable:
-
-**Why attention weights can be misleading**:
-- Attention weights can be high for uninformative tokens (e.g., [SEP] or period)
-- Different heads attend to different things — which head do you look at?
-- Attention is a weighted average of values; high attention weight doesn't mean "the model used this for its decision." The value vector might contribute little useful information even with high attention.
-- Jain & Wallace (2019): Attention weights don't always correlate with gradient-based feature importance measures
-
-**Better alternatives for explanation**: Gradient-based attribution, integrated gradients, SHAP, or probing classifiers.
-
 ---
 
-## 13. Interview Questions & Answers
+## 12. Interview Questions & Answers
 
 ### Q1: Derive scaled dot-product attention from scratch. Why divide by $\sqrt{d_k}$?
 

@@ -359,39 +359,6 @@ Use the document's inherent structure:
 
 **The sweet spot** for most use cases: **256-512 tokens** with 10-20% overlap.
 
-### 4.4 Parent-Child Chunking (Small-to-Big)
-
-A sophisticated strategy that retrieves with **small chunks** but returns **larger context**:
-
-```
-Document
-├── Parent Chunk (1024 tokens) ──── returned to LLM
-│   ├── Child Chunk 1 (256 tokens) ──── used for retrieval
-│   ├── Child Chunk 2 (256 tokens) ──── used for retrieval
-│   └── Child Chunk 3 (256 tokens) ──── used for retrieval
-├── Parent Chunk (1024 tokens)
-│   ├── Child Chunk 4 (256 tokens)
-...
-```
-
-1. **Index** the small child chunks (precise retrieval)
-2. When a child chunk matches, **return the parent chunk** (more context)
-
-**Why this works**: Small chunks give precise retrieval; large parent chunks give the LLM enough context to understand the answer. Best of both worlds.
-
-### 4.5 Contextual Retrieval (Anthropic, 2024)
-
-Prepend **contextual descriptions** to each chunk before embedding:
-
-```
-Original chunk: "Revenue increased by 15% to $4.2M."
-
-Contextualized chunk: "This chunk is from the Q3 2025 Financial Report,
-Section 3: Revenue Analysis. Revenue increased by 15% to $4.2M."
-```
-
-The added context helps the embedding model understand what the chunk is about, even without seeing the surrounding document. Anthropic showed this reduces retrieval failures by ~49%.
-
 ---
 
 ## 5. Vector Databases & ANN Algorithms
@@ -516,6 +483,38 @@ $$
 > 1B vectors      → Milvus or custom FAISS clusters — distributed + PQ
 ```
 
+### 5.5 HNSW Search — How It Works
+
+HNSW (Hierarchical Navigable Small World) is the index algorithm behind most vector databases.
+
+**Structure**: A multi-layer graph where:
+- Layer 2 (top): few nodes, long-range connections — for fast coarse navigation
+- Layer 1 (mid): medium density — intermediate routing
+- Layer 0 (base): all nodes, dense local connections — fine-grained search
+
+```
+Layer 2:  A ──────────────── F           (few nodes, skip large distances)
+              \             /
+Layer 1:  A──B──C──────D──E──F           (medium connectivity)
+              |         |
+Layer 0:  A─B─C─D─E─F─G─H─I─J─K─L─M    (all vectors, dense neighborhood graph)
+```
+
+**Search algorithm** (greedy):
+1. Start at entry point in Layer 2
+2. Find the neighbor closest to query in Layer 2 → move there
+3. Drop to Layer 1, repeat greedy search from that position
+4. Drop to Layer 0, find the ef nearest neighbors
+
+Result: $O(\log N)$ expected search time instead of $O(N)$ for brute force.
+
+**Key parameters**:
+- `M` = connections per node (16–64): higher = better recall, more memory
+- `ef_construction` = candidate list during build (100–200): higher = better index quality
+- `ef_search` = candidate list at query time: trade recall vs speed
+
+Recall@10 with M=16, ef=100: ~95%+ for most datasets.
+
 ---
 
 ## 6. Retrieval Methods — Dense, Sparse, Hybrid
@@ -611,6 +610,46 @@ where $k$ is a constant (typically 60) and $\text{rank}_r(d)$ is the rank of doc
 
 **The industry consensus**: Hybrid search with RRF is the default for production RAG. It captures both semantic similarity and keyword matching with minimal engineering overhead.
 
+### 6.5 Hybrid Retrieval — Score Fusion Worked Example
+
+Query: "What is the capital of France?"
+
+**BM25 (sparse) scores** (based on keyword match):
+
+```
+Doc1: "Paris is the capital city of France."          BM25 = 8.2  (exact terms)
+Doc2: "France is a country in Western Europe."        BM25 = 3.1
+Doc3: "The Eiffel Tower is located in Paris, France." BM25 = 5.4
+```
+
+**Dense retrieval scores** (cosine similarity of embeddings):
+
+```
+Doc1: 0.92  (semantically very similar)
+Doc2: 0.71  (topically related)
+Doc3: 0.85  (mentions Paris and France)
+```
+
+**Reciprocal Rank Fusion (RRF)** — combine rankings ($k=60$):
+
+```
+BM25 rankings:   Doc1=rank1, Doc3=rank2, Doc2=rank3
+Dense rankings:  Doc1=rank1, Doc3=rank2, Doc2=rank3
+
+RRF(Doc1) = 1/(60+1) + 1/(60+1) = 0.0328   (ranked 1st in both)
+RRF(Doc3) = 1/(60+2) + 1/(60+2) = 0.0323   (ranked 2nd in both)
+RRF(Doc2) = 1/(60+3) + 1/(60+3) = 0.0317   (ranked 3rd in both)
+```
+
+**Final ranking**: Doc1 > Doc3 > Doc2.
+
+When BM25 and dense disagree (e.g., exact-keyword match ranks differently from semantic similarity), RRF provides a robust fusion without needing to normalize score scales.
+
+**Why hybrid beats individual methods**:
+- BM25 excels: exact keyword matching, technical terms, named entities
+- Dense excels: semantic understanding, paraphrases, multilingual
+- Hybrid: best of both worlds — improves recall by 10–30% in typical evaluations
+
 ---
 
 ## 7. Re-Ranking — The Second Stage
@@ -642,64 +681,21 @@ The model sees the full interaction between query and document tokens through se
 
 A bi-encoder might rank both similarly (both mention "Python"). The cross-encoder understands that only Doc A answers the "when" question.
 
-### 7.3 ColBERT — Late Interaction
+### 7.3 ColBERT — Late Interaction (Brief)
 
-ColBERT (Khattab & Zaharia, 2020) is a compromise between bi-encoder and cross-encoder:
+ColBERT computes similarity at the **token level**: for each query token, find its maximum similarity with any document token, then sum. This is a middle ground between bi-encoder speed and cross-encoder quality. Document token embeddings are precomputed and indexed.
 
-**Idea**: Encode query and document independently (like bi-encoder), but compute similarity at the **token level** instead of the **sequence level**:
+$$\text{score}(q, d) = \sum_{i=1}^{|q|} \max_{j=1}^{|d|} \mathbf{q}_i^T \mathbf{d}_j$$
 
-$$
-\text{score}(q, d) = \sum_{i=1}^{|q|} \max_{j=1}^{|d|} \mathbf{q}_i^T \mathbf{d}_j
-$$
-
-For each query token, find the maximum similarity with any document token, then sum.
+### 7.4 Retrieval Stack Summary
 
 ```
-Query tokens:    [When] [was] [Python] [released]
-                   ↕      ↕      ↕        ↕
-Doc tokens:      [Python] [3.0] [was] [released] [on] [Dec] [3] [2008]
-
-Each query token finds its best-matching doc token:
-  "When"    → max match with "2008"?  (temporal)
-  "was"     → max match with "was"    (exact)
-  "Python"  → max match with "Python" (exact)
-  "released"→ max match with "released"(exact)
-Sum of max similarities → final score
+Stage 1: BM25 (sparse)          → 1000 candidates    (< 10ms)
+Stage 2: Dense retrieval (ANN)  →  100 candidates    (< 50ms)
+Stage 3: Cross-encoder re-rank  →   Top 10           (< 200ms)
+Stage 4: Prompt augmentation    →  Top 3-5 chunks
+Stage 5: LLM generation         →  Answer            (500ms-2s)
 ```
-
-**Advantages**:
-- Document token embeddings can be precomputed and indexed
-- Much faster than cross-encoder at query time
-- Better quality than simple bi-encoder (token-level matching captures more nuance)
-
-### 7.4 Re-Ranking with LLMs
-
-Modern approach: use the LLM itself to re-rank:
-
-```
-Rank these documents by relevance to the query: "{query}"
-
-[1] {doc_1}
-[2] {doc_2}
-[3] {doc_3}
-...
-
-Ranking:
-```
-
-**Advantages**: Captures complex reasoning about relevance. **Disadvantages**: Expensive (LLM inference per re-ranking step), high latency.
-
-### 7.5 The Full Retrieval Stack
-
-```
-Stage 1: BM25 (sparse)           → 1000 candidates    (< 10ms)
-Stage 2: Dense retrieval (ANN)   → 100 candidates     (< 50ms)
-Stage 3: Cross-encoder re-rank   → Top 10             (< 200ms)
-Stage 4: Augment prompt          → Top 3-5 chunks
-Stage 5: LLM generation          → Answer             (500ms-2s)
-```
-
-Total latency: ~1-3 seconds for a high-quality RAG response.
 
 ---
 
@@ -909,18 +905,14 @@ $$
 
 RAGAS (Retrieval Augmented Generation Assessment — Es et al., 2023) is the most widely used RAG evaluation framework. It automates evaluation using an LLM as judge:
 
-| Metric | What It Measures | How It's Computed |
-|--------|-----------------|------------------|
-| **Faithfulness** | Is the answer grounded in context? | LLM extracts claims from answer, checks each against context |
-| **Answer Relevancy** | Does the answer address the question? | Generate questions from the answer, compare to original query |
-| **Context Precision** | Are relevant chunks ranked higher? | LLM judges relevance of each chunk; check ranking |
-| **Context Recall** | Is all needed info retrieved? | Compare reference answer sentences to context |
+| Metric | What It Measures |
+|--------|-----------------|
+| **Faithfulness** | Is the answer grounded in the retrieved context? (hallucination check) |
+| **Answer Relevancy** | Does the answer actually address what was asked? |
+| **Context Precision** | Are the most relevant chunks ranked highest? |
+| **Context Recall** | Was all the necessary information retrieved from the corpus? |
 
-**RAGAS Score** (overall):
-
-$$
-\text{RAGAS} = \text{Harmonic Mean}(\text{Faithfulness}, \text{Answer Relevancy}, \text{Context Precision}, \text{Context Recall})
-$$
+Overall RAGAS score = harmonic mean of all four metrics. A score above 0.7 is generally considered acceptable; above 0.85 is production-ready.
 
 ### 9.4 Beyond Automated Metrics
 
@@ -1014,6 +1006,20 @@ Example: A customer support bot:
 - Fine-tuned on support conversations (learns the right tone and format)
 - RAG for product documentation (updated as products change)
 - Long context for the current conversation thread
+
+### 10.5 When to Use What — Decision Table
+
+| Scenario | Recommended approach | Why |
+|----------|---------------------|-----|
+| Knowledge changes frequently (news, docs) | RAG | Fine-tuning can't update dynamically |
+| Need to cite sources | RAG | Returns retrieved chunks with provenance |
+| Specialized domain vocabulary (medical, legal) | Fine-tuning | Teach model new language patterns |
+| Improve instruction following | Fine-tuning (SFT) | Task format is learnable |
+| Context ≤ 100K tokens, source known | Long context (stuffing) | Simplest, no retrieval error |
+| Context > 1M tokens | RAG | Long context too expensive |
+| Latency critical (<100ms) | Fine-tuning | No retrieval roundtrip |
+| Need factual accuracy on specific corpus | RAG + fine-tuning | Fine-tune the retriever and generator |
+| Budget limited, fast deployment | RAG | No training cost |
 
 ---
 

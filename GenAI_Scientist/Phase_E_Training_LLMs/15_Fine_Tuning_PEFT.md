@@ -15,14 +15,12 @@
 7. [LoRA — Practical Considerations](#7-lora-practical)
 8. [QLoRA — Quantized LoRA](#8-qlora)
 9. [NF4 — The NormalFloat Data Type](#9-nf4)
-10. [Adapter Layers](#10-adapter-layers)
-11. [Prefix Tuning](#11-prefix-tuning)
-12. [Prompt Tuning](#12-prompt-tuning)
-13. [DoRA — Weight-Decomposed Low-Rank Adaptation](#13-dora)
-14. [Comparing PEFT Methods](#14-comparing-peft)
-15. [Instruction Tuning](#15-instruction-tuning)
-16. [When to Fine-Tune vs Prompt vs RAG](#16-decision-framework)
-17. [Interview Questions & Answers](#17-interview-qa)
+10. [Other PEFT Methods (Brief Reference)](#10-other-peft)
+11. [DoRA — Weight-Decomposed Low-Rank Adaptation](#11-dora)
+12. [Comparing PEFT Methods](#12-comparing-peft)
+13. [Instruction Tuning](#13-instruction-tuning)
+14. [When to Fine-Tune vs Prompt vs RAG](#14-decision-framework)
+15. [Interview Questions & Answers](#15-interview-qa)
 
 ---
 
@@ -284,6 +282,45 @@ Base Model W₀ ──────┼── LoRA_task2 (BA)₂ ──→ Task 2 
 
 Each LoRA adapter is tiny (a few MB), so you can store hundreds of task-specific adapters alongside one base model.
 
+### 6.7 LoRA Parameter Count — Concrete Numbers
+
+**Scenario**: Fine-tuning BERT-base for sentiment classification. $d_{\text{model}} = 768$, applying LoRA to all attention Q and V projections.
+
+**Full fine-tuning** of one Q matrix:
+
+$$W_Q \text{ shape: } 768 \times 768 = 589{,}824 \text{ parameters}$$
+
+**LoRA of one Q matrix** with rank $r=8$:
+
+```
+A shape: 768 × 8  = 6,144 parameters
+B shape: 8  × 768 = 6,144 parameters
+Total:             12,288 parameters
+Reduction: 589,824 / 12,288 = 48× fewer parameters
+```
+
+**Full BERT-base LoRA** ($r=8$, applied to Q and V in all 12 layers):
+
+```
+Per layer: 2 matrices × 12,288 = 24,576 trainable params
+All 12 layers: 12 × 24,576     = 294,912 trainable params
+
+Full fine-tuning: 110M trainable params
+LoRA:             295K trainable params  →  373× fewer trainable parameters
+```
+
+**Rank comparison** for BERT-base Q projection (768×768):
+
+```
+r=1:   768×1 + 1×768 =  1,536 params   (0.26% of full)
+r=4:   768×4 + 4×768 =  6,144 params   (1.04% of full)
+r=8:   768×8 + 8×768 = 12,288 params   (2.08% of full)
+r=16: 768×16+16×768  = 24,576 params   (4.17% of full)
+r=64: 768×64+64×768  = 98,304 params  (16.7%  of full)
+```
+
+Typical: $r=4$ to $r=16$ gives best quality/efficiency tradeoff for most tasks.
+
 ---
 
 ## 7. LoRA — Practical Considerations
@@ -423,174 +460,64 @@ Weights are quantized in blocks of 64:
 
 **Double quantization**: The FP16 scales $s$ across all blocks are themselves quantized to FP8, with a second-level scale stored per group of 256 blocks. This saves ~0.37 bits/parameter.
 
----
+### 9.4 QLoRA Memory Calculation
 
-## 10. Adapter Layers
+**Fine-tuning Llama 2 7B** (7 billion parameters):
 
-Houlsby et al. (2019) proposed inserting small bottleneck modules within each transformer layer.
-
-### 10.1 Architecture
+**Full fine-tuning in FP16**:
 
 ```
-          Standard Transformer Layer with Adapters
-
-   Input
-     │
-     ▼
-  ┌──────────────────┐
-  │ Multi-Head Attn   │
-  └────────┬─────────┘
-           │
-     ┌─────▼─────┐
-     │  Adapter₁  │  ← NEW (trainable)
-     │  down→up   │
-     └─────┬─────┘
-           │
-     ┌─────▼─────┐
-     │ LayerNorm  │
-     │ + Residual │
-     └─────┬─────┘
-           │
-  ┌────────▼─────────┐
-  │    FFN Layer      │
-  └────────┬─────────┘
-           │
-     ┌─────▼─────┐
-     │  Adapter₂  │  ← NEW (trainable)
-     │  down→up   │
-     └─────┬─────┘
-           │
-     ┌─────▼─────┐
-     │ LayerNorm  │
-     │ + Residual │
-     └─────┬─────┘
-           │
-        Output
+Parameters (fp16):        7B × 2 bytes  = 14 GB
+Gradients (fp16):         7B × 2 bytes  = 14 GB
+Optimizer (fp32 Adam):    7B × 12 bytes = 84 GB
+Activations (estimate):               ~10–20 GB
+Total: ~122–132 GB  ← requires 2–4 × A100 80 GB
 ```
 
-### 10.2 Adapter Module
+**QLoRA** (4-bit base model + fp16 LoRA):
 
-Each adapter is a bottleneck:
+```
+Base model (INT4):         7B × 0.5 bytes =  3.5 GB
+LoRA params (fp16):      ~30M × 2 bytes  =  0.06 GB   (r=8, all attention layers)
+LoRA gradients (fp16):   ~30M × 2 bytes  =  0.06 GB
+Optimizer for LoRA only: ~30M × 12 bytes =  0.36 GB   (ONLY optimize LoRA!)
+Activations (estimate):                  ~  6 GB
+Total: ~10 GB  ← fits on a single RTX 3090 (24 GB) with batch size 1–4!
+```
 
-$$\text{Adapter}(h) = h + f(h W_{\text{down}}) W_{\text{up}}$$
-
-where:
-- $W_{\text{down}} \in \mathbb{R}^{d \times m}$ projects to bottleneck dimension $m \ll d$
-- $f$ is a nonlinearity (ReLU or GELU)
-- $W_{\text{up}} \in \mathbb{R}^{m \times d}$ projects back to model dimension
-- The skip connection ($h + \ldots$) ensures the adapter starts as identity
-
-**Parameters per adapter**: $2 \times d \times m$. With $m = 64, d = 4096$: $\sim 524K$ per adapter.
-
-### 10.3 Comparison with LoRA
-
-| Property | Adapters | LoRA |
-|----------|---------|------|
-| Where inserted | After attention and FFN | Parallel to weight matrices |
-| Nonlinearity | Yes (ReLU/GELU) | No |
-| Inference overhead | Yes (extra sequential computation) | None (merge into weights) |
-| Trainable params | Similar to LoRA | Similar to adapters |
-| Multi-task serving | Swap adapter modules | Swap $A, B$ matrices |
-
-**LoRA's key advantage**: Zero inference overhead after merging. This is why LoRA has largely superseded adapters in practice.
+**The trick**: The base model is frozen in INT4 (no gradients needed), so its 3.5 GB is purely for the forward pass. Only the tiny LoRA weights are trained. NF4 (NormalFloat4) quantization minimizes information loss for normally-distributed weights.
 
 ---
 
-## 11. Prefix Tuning
+## 10. Other PEFT Methods (Brief Reference)
 
-Li & Liang (2021): Prepend trainable continuous vectors (prefix) to the keys and values at every attention layer.
+### 10.1 Adapter Layers (Houlsby et al., 2019)
 
-### 11.1 Mechanism
+- Insert small bottleneck modules ($W_{\text{down}} \in \mathbb{R}^{d \times m}$, $W_{\text{up}} \in \mathbb{R}^{m \times d}$) after each attention and FFN sublayer
+- Parameters per adapter: $2dm$. With $m=64, d=4096$: ~524K per adapter
+- Skip connection ensures identity initialization (no disruption at start)
+- **Limitation vs LoRA**: Adds sequential compute at inference; LoRA can be merged into weights at zero inference cost
 
-For each attention layer $l$, prepend learned prefix vectors to the key and value:
+### 10.2 Prefix Tuning (Li & Liang, 2021)
 
-$$K^{(l)} = [\underbrace{P_K^{(l)}}_{\text{prefix } (p \times d_k)}; \underbrace{K_{\text{input}}^{(l)}}_{\text{from input } (T \times d_k)}]$$
+- Prepend $p$ trainable continuous vectors to keys and values at **every** attention layer
+- Params: $p \times d \times 2 \times L$ (e.g., 5.2M for p=20, d=4096, L=32)
+- Instability risk: optimized via a reparameterization MLP discarded after training
+- Consumes $p$ tokens of context window at inference
 
-$$V^{(l)} = [\underbrace{P_V^{(l)}}_{\text{prefix } (p \times d_v)}; \underbrace{V_{\text{input}}^{(l)}}_{\text{from input } (T \times d_v)}]$$
+### 10.3 Prompt Tuning (Lester et al., 2021)
 
-where $p$ is the prefix length. The queries attend over both the prefix and the input:
-
-$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{Q [P_K; K_{\text{input}}]^\top}{\sqrt{d_k}}\right) [P_V; V_{\text{input}}]$$
-
-```
-Prefix Tuning Attention:
-
-Queries:  [q₁ q₂ q₃ q₄ q₅]     (from input, frozen computation)
-
-Keys:     [p₁ p₂ | k₁ k₂ k₃ k₄ k₅]    ← prefix + input
-           ──────   ─────────────────
-           trainable    frozen
-
-Values:   [p₁ p₂ | v₁ v₂ v₃ v₄ v₅]    ← prefix + input
-           ──────   ─────────────────
-           trainable    frozen
-```
-
-### 11.2 Reparameterization
-
-Directly optimizing the prefix vectors is unstable. Instead, the prefix is generated by a small MLP:
-
-$$P^{(l)} = \text{MLP}_\phi(E^{(l)})$$
-
-where $E^{(l)} \in \mathbb{R}^{p \times d'}$ is a learnable embedding and $\text{MLP}_\phi$ maps to the required dimension. After training, the MLP is discarded and only the computed prefix vectors are kept.
-
-### 11.3 Parameters
-
-For prefix length $p$, model dimension $d$, and $L$ layers with $H$ heads:
-
-$$\text{Prefix params} = p \times d \times 2 \times L$$
-
-(Factor of 2 for keys and values.) With $p = 20, d = 4096, L = 32$:
-
-$$20 \times 4096 \times 2 \times 32 = 5.2M \text{ parameters}$$
-
-### 11.4 Limitations
-
-- **Inference overhead**: Prefix tokens consume context window space ($p$ tokens lost)
-- **Attention dilution**: Real input tokens must "compete" with prefix for attention weight
-- **Instability**: Can be hard to optimize, especially with long prefixes
+- Prepend $p$ learnable embedding vectors to the **input** only (not every layer)
+- Fewest params of any PEFT: $p \times d$ total
+- Only matches full fine-tuning at 10B+ parameters; underperforms at smaller scale
 
 ---
 
-## 12. Prompt Tuning
-
-Lester et al. (2021): Learn soft prompt embeddings that are prepended to the input at the embedding layer only (not at every layer like prefix tuning).
-
-### 12.1 Mechanism
-
-Given input token embeddings $[e_1, e_2, \ldots, e_T]$, prepend $p$ learnable vectors:
-
-$$\text{Input to model} = [\underbrace{s_1, s_2, \ldots, s_p}_{\text{soft prompt (trainable)}}, \underbrace{e_1, e_2, \ldots, e_T}_{\text{input embeddings (frozen)}}]$$
-
-where $s_i \in \mathbb{R}^d$ are the soft prompt parameters.
-
-### 12.2 Comparison with Prefix Tuning
-
-| Property | Prompt Tuning | Prefix Tuning |
-|----------|--------------|---------------|
-| Where | Input embedding layer only | Every attention layer (K, V) |
-| Parameters | $p \times d$ | $p \times d \times 2 \times L$ |
-| Expressiveness | Lower | Higher |
-| Scale dependence | Works best at $\geq$ 10B | Works at all scales |
-
-### 12.3 Scaling Behavior
-
-A remarkable finding from Lester et al.:
-
-- At 10B+ parameters, prompt tuning **matches** full fine-tuning performance
-- At smaller scales (< 1B), prompt tuning significantly underperforms
-
-This suggests that larger models have more "capacity" in their representation space, making it easier for a few soft tokens to steer behavior. The soft prompt acts as a key that unlocks latent capabilities already present in the large model.
-
-$$\lim_{|\theta| \to \infty} \text{gap}(\text{prompt tuning}, \text{full FT}) \to 0$$
-
----
-
-## 13. DoRA — Weight-Decomposed Low-Rank Adaptation
+## 11. DoRA — Weight-Decomposed Low-Rank Adaptation
 
 Liu et al. (2024): Decompose the weight update into **magnitude** and **direction** components, applying LoRA only to the direction.
 
-### 13.1 Weight Decomposition
+### 11.1 Weight Decomposition
 
 Any weight matrix can be decomposed:
 
@@ -608,7 +535,7 @@ where:
 - $\Delta m \in \mathbb{R}^{1 \times k}$ is a trainable magnitude vector (very few params)
 - $BA$ is the standard LoRA update to the directional component
 
-### 13.2 Why Decomposition Helps
+### 11.2 Why Decomposition Helps
 
 Analysis of full fine-tuning shows that magnitude and direction change differently:
 - **Magnitude** changes are small and smooth
@@ -616,15 +543,15 @@ Analysis of full fine-tuning shows that magnitude and direction change different
 
 By separating them, DoRA can apply more capacity (LoRA) where it matters most (direction) while using a simple scalar for magnitude. This more closely mimics the learning dynamics of full fine-tuning.
 
-### 13.3 Results
+### 11.3 Results
 
 DoRA consistently outperforms LoRA by 1-3% across benchmarks while using the same number of parameters. The improvement is most notable at low ranks ($r = 4\text{-}8$) where LoRA's approximation error is highest.
 
 ---
 
-## 14. Comparing PEFT Methods
+## 12. Comparing PEFT Methods
 
-### 14.1 Comprehensive Comparison
+### 12.1 Comprehensive Comparison
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -647,7 +574,7 @@ DoRA consistently outperforms LoRA by 1-3% across benchmarks while using the sam
 * After weight merging     ** Matches full FT at 10B+ scale
 ```
 
-### 14.2 Decision Tree
+### 12.2 Decision Tree
 
 ```mermaid
 flowchart TD
@@ -662,13 +589,30 @@ flowchart TD
     RANK -->|Simple| LORA_LOW[LoRA r=8-16]
 ```
 
+### 12.3 PEFT Methods — Quick Reference Table
+
+| Method | Trainable Params | Quality vs Full FT | Memory Savings | Use Case |
+|--------|-----------------|-------------------|----------------|----------|
+| Full Fine-Tuning | 100% | Best (baseline) | None | Small models, ample GPU |
+| LoRA (r=8) | 0.1–1% | 95–99% | 3–5× optimizer | Standard fine-tuning |
+| QLoRA (4-bit + LoRA) | 0.1–1% | 90–95% | 8–10× | Single GPU, 7B+ models |
+| DoRA | 0.1–1% | ~LoRA or better | Same as LoRA | When LoRA quality isn't enough |
+| Adapter | 0.5–3% | 90–95% | 3–5× | Multi-task, insert adapters per task |
+| Prefix Tuning | 0.1–0.5% | 85–92% | 3–5× | Few-shot, limited GPU |
+| Prompt Tuning | <0.01% | 75–85% | Best | Very limited resources, 10B+ model |
+
+**Rule of thumb for production**:
+- QLoRA: go-to for large models (13B+) on limited hardware
+- LoRA ($r=16$): go-to for 7B models, high quality needed
+- Full fine-tuning: only if you have the GPU budget and need maximum quality
+
 ---
 
-## 15. Instruction Tuning
+## 13. Instruction Tuning
 
 Instruction tuning teaches a pretrained model to follow instructions — converting a text completion engine into an assistant.
 
-### 15.1 The Format
+### 13.1 The Format
 
 ```
 System: You are a helpful assistant.
@@ -685,7 +629,7 @@ $$\mathcal{L}_{\text{SFT}} = -\sum_{t \in \text{response tokens}} \log P_\theta(
 
 Instruction/system tokens are used for conditioning (they go through the forward pass) but receive no gradient.
 
-### 15.2 Key Instruction Tuning Datasets
+### 13.2 Key Instruction Tuning Datasets
 
 | Dataset | Size | Source | Key Property |
 |---------|------|--------|-------------|
@@ -696,7 +640,7 @@ Instruction/system tokens are used for conditioning (they go through the forward
 | OpenHermes 2.5 | 1M | Multi-source synthetic | High quality, curated |
 | ShareGPT | ~90K | Real conversations | Natural dialogue patterns |
 
-### 15.3 The FLAN Recipe
+### 13.3 The FLAN Recipe
 
 Chung et al. (2022) showed that instruction tuning on a diverse mixture of tasks with instructions produces models that generalize to unseen tasks:
 
@@ -707,7 +651,7 @@ Key findings:
 - Adding chain-of-thought examples during instruction tuning enables CoT at inference
 - Instruction tuning on a 1.8K-task mixture improved PaLM on held-out benchmarks by 9.4%
 
-### 15.4 How Instruction Format Affects Behavior
+### 13.4 How Instruction Format Affects Behavior
 
 The choice of prompt template significantly impacts fine-tuned model behavior:
 
@@ -719,9 +663,9 @@ A model instruction-tuned only on short Q&A pairs will struggle with multi-step 
 
 ---
 
-## 16. When to Fine-Tune vs Prompt vs RAG
+## 14. When to Fine-Tune vs Prompt vs RAG
 
-### 16.1 Decision Framework
+### 14.1 Decision Framework
 
 ```mermaid
 flowchart TD
@@ -743,7 +687,7 @@ flowchart TD
     FULL_OR_LORA -->|Good enough| LORA2[LoRA]
 ```
 
-### 16.2 Comparison Table
+### 14.2 Comparison Table
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -768,7 +712,7 @@ flowchart TD
 └──────────────┴────────────┴──────────────┴──────────────────────┘
 ```
 
-### 16.3 The Key Distinction: Knowledge vs Behavior
+### 14.3 The Key Distinction: Knowledge vs Behavior
 
 - **Knowledge problem**: The model doesn't have the information (company docs, recent events, domain data) → **RAG** (retrieval injects knowledge at inference time)
 - **Behavior problem**: The model has the knowledge but doesn't use it correctly (wrong format, wrong style, wrong reasoning pattern) → **Fine-tuning** (changes how the model behaves)
@@ -776,7 +720,7 @@ flowchart TD
 
 ---
 
-## 17. Interview Questions & Answers
+## 15. Interview Questions & Answers
 
 ### Q1: Derive the LoRA update rule. Why does low-rank approximation work for fine-tuning?
 

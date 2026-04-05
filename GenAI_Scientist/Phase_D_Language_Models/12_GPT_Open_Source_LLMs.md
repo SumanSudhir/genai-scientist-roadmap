@@ -20,10 +20,8 @@
 7. [Llama Family — Open-Source Revolution](#7-llama-family--open-source-revolution)
 8. [Mistral & Mixtral — Efficiency Through Sparsity](#8-mistral--mixtral--efficiency-through-sparsity)
 9. [Mixture of Experts (MoE) — Deep Dive](#9-mixture-of-experts-moe--deep-dive)
-10. [Small Language Models — Phi, Gemma & the Efficiency Frontier](#10-small-language-models--phi-gemma--the-efficiency-frontier)
-11. [DeepSeek & Qwen — The Global LLM Landscape](#11-deepseek--qwen--the-global-llm-landscape)
-12. [Architectural Innovations Timeline](#12-architectural-innovations-timeline)
-13. [Interview Questions & Answers](#13-interview-questions--answers)
+10. [Architectural Innovations Timeline](#10-architectural-innovations-timeline)
+11. [Interview Questions & Answers](#11-interview-questions--answers)
 
 ---
 
@@ -152,44 +150,7 @@ QA:             "Q: What is the capital of France? A:"    → "Paris"
 
 The model was never explicitly trained on translation, summarization, or QA. It learned these capabilities implicitly from predicting next tokens in diverse web text.
 
-### 3.2 Architecture
-
-| Parameter | GPT-1 | GPT-2 Small | GPT-2 Medium | GPT-2 Large | GPT-2 XL |
-|-----------|-------|-------------|--------------|-------------|----------|
-| Layers | 12 | 12 | 24 | 36 | 48 |
-| $d_{\text{model}}$ | 768 | 768 | 1024 | 1280 | 1600 |
-| Heads | 12 | 12 | 16 | 20 | 25 |
-| Parameters | 117M | 124M | 355M | 774M | 1.5B |
-| Context | 512 | 1024 | 1024 | 1024 | 1024 |
-
-**Architectural changes from GPT-1**:
-- **Pre-LN** instead of Post-LN (LayerNorm moved before self-attention and FFN)
-- Final LayerNorm added after the last block
-- Context length doubled to 1024
-- Larger vocabulary: 50,257 tokens (byte-level BPE)
-- Modified initialization: residual layer weights scaled by $1/\sqrt{N}$ where $N$ is the number of layers
-
-### 3.3 Training Data: WebText
-
-GPT-2 was trained on **WebText** — web pages linked from Reddit posts with at least 3 upvotes:
-- 8 million documents, ~40GB of text
-- Curated for quality through social signals (Reddit karma)
-- Diverse: news, fiction, code, forums, Wikipedia, etc.
-
-**Key insight**: Data diversity was critical. A model trained only on books or Wikipedia wouldn't learn to do translation or code generation. The web contains examples of almost every language task implicitly.
-
-### 3.4 Byte-Level BPE
-
-GPT-2 introduced **byte-level BPE** (also called BBPE):
-
-- Operates on raw bytes (256 base tokens) rather than Unicode characters
-- **No unknown tokens**: Any byte sequence can be represented
-- Handles any language, encoding, or special character
-- Vocabulary: 50,257 subword tokens
-
-This became the standard tokenization approach for subsequent GPT models.
-
-### 3.5 Significance
+### 3.2 Significance
 
 GPT-2 demonstrated the **zero-shot paradigm**: scale up the model and data, and tasks emerge without explicit training. This was the first hint that language models might be **general-purpose AI systems**, not just text predictors.
 
@@ -290,6 +251,38 @@ The GPT-3 paper was unusually candid about limitations:
 3. **Bias**: Reflects biases present in training data
 4. **Factuality**: Confidently generates plausible-sounding but incorrect facts
 5. **Context window**: 2048 tokens was limiting for many real-world tasks
+
+### 4.7 In-Context Learning — How It Works
+
+GPT-3's most surprising property: it can learn new tasks from examples in the prompt.
+
+**3-shot sentiment classification example**:
+
+```
+Prompt:
+  "The food was terrible." → negative
+  "Great service, loved it!" → positive
+  "It was okay I guess." → neutral
+  "The best meal of my life!" → ???
+
+GPT-3 output: "positive"
+```
+
+No gradient updates — this happens at inference time. The model simply completes the pattern.
+
+**What's actually happening**:
+1. The model has seen millions of similar format patterns during pretraining
+2. The examples in the prompt act as a "task description" that activates relevant knowledge
+3. "Induction heads" (attention heads that copy past patterns) match [example → label] pairs
+4. The model continues the pattern with the test input
+
+**Why this is remarkable**:
+- 0-shot: no examples, just instruction ("Classify sentiment: ...")
+- 1-shot: one example
+- Few-shot (k-shot): k examples (typically k=3-10)
+- Performance scales with k and model size — tiny models can't do it, large ones can
+
+**The emergent capability**: GPT-3 (175B) showed this clearly; GPT-2 (1.5B) showed it weakly; earlier models couldn't do it at all. This suggests ICL is an emergent capability that appears above a parameter threshold (~10-50B for reliable few-shot learning).
 
 ---
 
@@ -414,6 +407,37 @@ $$
 $$
 
 At ~$2/GPU-hour: **~$7M** in compute.
+
+### 5.7 Chinchilla Scaling Law — Worked Example
+
+Chinchilla (Hoffmann et al., 2022) found the compute-optimal recipe:
+
+$$
+N_{\text{opt}} \propto C^{0.5} \quad \text{(model size)}, \qquad D_{\text{opt}} \propto C^{0.5} \quad \text{(training tokens)}
+$$
+
+More precisely: optimal N/D ratio ≈ **20 tokens per parameter**.
+
+**Example**: Given a compute budget of $6 \times 10^{23}$ FLOPs (roughly GPT-3's budget):
+
+```
+GPT-3's approach:  N=175B params, D=300B tokens   (ratio ≈ 1.7 tokens/param)
+Chinchilla:        N=70B params,  D=1.4T tokens   (ratio ≈ 20 tokens/param)
+```
+
+Chinchilla 70B (compute-matched to GPT-3 175B) outperforms GPT-3 on most benchmarks!
+
+**The insight**: GPT-3 was severely undertrained relative to its parameter count. Models should be trained on ~20× more tokens than they have parameters.
+
+**Practical impact on modern models**:
+
+```
+Llama 2 7B:  trained on 2T tokens  → 286 tokens/param  (far more than 20×)
+Llama 2 70B: trained on 2T tokens  → 29 tokens/param   (close to Chinchilla optimal)
+Llama 3 8B:  trained on 15T tokens → 1875 tokens/param (massively over-trained)
+```
+
+Modern models violate Chinchilla because **inference cost matters**: a smaller, longer-trained model is cheaper to serve even if not compute-optimal to train. Training cost is one-time; serving cost is per-query.
 
 ---
 
@@ -741,148 +765,69 @@ This loss encourages uniform distribution of tokens across experts. Minimized wh
 | GPT-4 (rumored) | 8 | 2 | ~1.8T | ~220B | Frontier |
 | DeepSeek-V3 | 256 | 8 | 671B | 37B | Competitive with GPT-4 |
 
----
+### 9.8 MoE Routing — Concrete Example
 
-## 10. Small Language Models — Phi, Gemma & the Efficiency Frontier
+**Architecture**: 8 experts, top-2 routing (each token uses 2 of 8 experts).
 
-### 10.1 The Small Model Revolution
+For token "Paris" in a Mixtral-style model:
 
-A counter-trend to the "bigger is better" narrative: small models (1-14B) trained on carefully curated data can dramatically outperform their size class.
-
-### 10.2 Phi Family (Microsoft)
-
-| Model | Params | Training Data | Key Result |
-|-------|--------|--------------|------------|
-| Phi-1 (2023) | 1.3B | 7B tokens (textbook + synthetic) | Strong code generation |
-| Phi-1.5 (2023) | 1.3B | 30B tokens (synthetic-heavy) | Beats 10× larger models on reasoning |
-| Phi-2 (2023) | 2.7B | 1.4T tokens (curated + synthetic) | Matches Llama 2 7B |
-| Phi-3 Mini (2024) | 3.8B | 3.3T tokens (heavily filtered) | Matches Mixtral 8x7B on some benchmarks |
-| Phi-3 Medium (2024) | 14B | 4.8T tokens | Competitive with GPT-3.5 |
-
-**Phi's key insight**: **Data quality > quantity > model size**.
-
-The Phi series demonstrated that:
-
-1. **Synthetic data works**: Phi-1 and Phi-1.5 used textbook-quality synthetic data generated by GPT-4. This data was structured, educational, and contained explicit reasoning steps.
-
-2. **Data curriculum matters**: Training on progressively harder data (easy → hard, simple → complex) produces better models than random shuffling.
-
-3. **Filtering is critical**: Phi-3 Mini (3.8B) was trained on heavily filtered web data where a classifier identified "educational" content. This created a high-quality 3.3T token dataset that punched far above its weight.
-
-### 10.3 Gemma Family (Google)
-
-| Model | Params | Training Tokens | Key Feature |
-|-------|--------|----------------|-------------|
-| Gemma 1 2B | 2.5B | 2T | Compact, strong for size |
-| Gemma 1 7B | 8.5B | 6T | Matches Llama 2 7B |
-| Gemma 2 2B | 2.6B | 2T | Knowledge distillation |
-| Gemma 2 9B | 9.2B | 8T | Strong mid-range |
-| Gemma 2 27B | 27.2B | 13T | Matches Llama 3 70B on some tasks |
-
-**Gemma's contributions**:
-
-1. **Knowledge distillation**: Gemma 2 models were trained with knowledge distillation from larger teacher models, transferring capabilities that would otherwise require more parameters.
-
-2. **Logit soft-capping**: Gemma 2 caps the attention logits to prevent extreme values:
+1. Gating network computes scores for all 8 experts:
 
 $$
-\text{logits} = \text{tanh}\left(\frac{\text{logits}}{\text{cap}}\right) \times \text{cap}
-$$
-
-This improves training stability.
-
-3. **Local + global attention**: Gemma 2 alternates between local sliding window attention and full global attention across layers, combining efficiency with long-range capability.
-
-4. **256K vocabulary**: One of the largest vocabularies, enabling efficient tokenization across many languages.
-
-### 10.4 Why Small Models Punch Above Their Weight
-
-Several factors explain why modern small models are so capable:
-
-**1. Massive overtraining**: Training 3.8B params on 3.3T tokens (868 tokens/param) far exceeds Chinchilla-optimal (~20 tokens/param). The model extracts maximum learning from the data.
-
-**2. Data quality**: Aggressive filtering, deduplication, and synthetic data generation. Quality is more impactful than quantity at small scale.
-
-**3. Knowledge distillation**: Training with soft labels from a larger model transfers capabilities that the small model couldn't learn from raw data alone.
-
-**4. Architecture refinements**: GQA, RoPE, SwiGLU, and other innovations from larger models are equally effective at small scale.
-
-**5. Better tokenizers**: Larger vocabularies mean fewer tokens per input, effectively giving the model "more context" per input.
-
----
-
-## 11. DeepSeek & Qwen — The Global LLM Landscape
-
-### 11.1 DeepSeek (China)
-
-DeepSeek has produced some of the most technically innovative open-source models.
-
-**DeepSeek-V2 (May 2024)**:
-- **Multi-head Latent Attention (MLA)**: A novel attention mechanism that compresses KV caches by projecting keys and values into a low-rank latent space:
-
-$$
-\mathbf{c}_t = \mathbf{W}^{DKV} \mathbf{h}_t \quad \text{(compress to latent, } d_c \ll d \text{)}
+\mathbf{g} = \text{softmax}(\mathbf{W}_{\text{gate}} \times \text{token\_embedding})
 $$
 
 $$
-\mathbf{k}_t = \mathbf{W}^{UK} \mathbf{c}_t, \quad \mathbf{v}_t = \mathbf{W}^{UV} \mathbf{c}_t \quad \text{(decompress for attention)}
+\mathbf{g} = [0.28,\ 0.05,\ 0.31,\ 0.08,\ 0.11,\ 0.04,\ 0.09,\ 0.04]
 $$
 
-Only the compressed $\mathbf{c}_t$ is cached — reducing KV cache by ~93% compared to MHA.
+2. Select top-2: **Expert 3** (0.31) and **Expert 1** (0.28)
 
-- **DeepSeekMoE**: 160 fine-grained experts with top-6 routing + 2 shared experts (always active). Fine-grained experts (more experts, smaller each) enable better specialization.
+3. Renormalize weights: $[0.28/(0.28+0.31),\ 0.31/(0.28+0.31)] = [0.47,\ 0.53]$
 
-**DeepSeek-V3 (December 2024)**:
-- 671B total parameters, 37B active per token
-- 256 routed experts + 1 shared expert
-- **Auxiliary-loss-free load balancing**: Uses a bias term added to router logits to balance loads without the auxiliary loss (which can hurt model quality)
-- **Multi-Token Prediction (MTP)**: Predicts multiple future tokens simultaneously, providing denser training signal
-- Trained for just **$5.5M** — remarkably efficient
+4. Compute FFN for selected experts only:
 
-**DeepSeek-R1 (January 2025)**:
-- Reasoning model (similar to o1/o3)
-- Trained with **pure reinforcement learning** (no SFT) to develop chain-of-thought reasoning
-- Showed that reasoning capabilities can emerge from RL alone
+$$
+\text{output} = 0.47 \times \text{Expert}_1(\text{"Paris"}) + 0.53 \times \text{Expert}_3(\text{"Paris"})
+$$
 
-### 11.2 Qwen (Alibaba)
-
-| Model | Params | Context | Notable |
-|-------|--------|---------|---------|
-| Qwen 1.5 (2024) | 0.5B-110B | 32K | Strong multilingual, especially Chinese |
-| Qwen 2 (2024) | 0.5B-72B | 128K | GQA, SwiGLU, RoPE — Llama-like architecture |
-| Qwen 2.5 (2024) | 0.5B-72B | 128K | 18T tokens training, strong coding + math |
-| QwQ (2024) | 32B | 32K | Reasoning model (o1-like) |
-
-**Qwen's contributions**:
-- Consistent, high-quality releases across many sizes
-- Strong multilingual capability (especially CJK languages)
-- Competitive with Llama 3 at equivalent sizes
-- Open weights with permissive licenses
-
-### 11.3 The Convergent Architecture
-
-A remarkable observation: despite being developed independently across continents, all major LLMs have converged on essentially the same architecture:
+5. Experts 2, 4, 5, 6, 7, 8 do NOT process this token — no compute for them.
 
 ```
-Architecture: Decoder-only
-Normalization: Pre-RMSNorm
-FFN: SwiGLU
-Position: RoPE
-Attention: GQA
-Bias: None
-
-Used by: Llama, Mistral, Qwen, DeepSeek, Gemma, Phi, ...
+Token       Experts chosen         Experts skipped
+"Paris"  →  [Expert1, Expert3]     [Expert2,4,5,6,7,8] — not activated
+"the"    →  [Expert2, Expert5]     [Expert1,3,4,6,7,8] — not activated
+"jumped" →  [Expert4, Expert1]     [Expert2,3,5,6,7,8] — not activated
 ```
 
-The differentiation now comes from:
-1. **Data**: Quality, quantity, domain mix
-2. **Training recipe**: Learning rate schedule, batch size progression, data curriculum
-3. **Scaling strategy**: Dense vs MoE, model size vs data size
-4. **Post-training**: Alignment, RLHF/DPO, instruction tuning
+**Compute savings**: 8 experts, 2 active → use 25% of FFN parameters per token.
+If each expert has $d_{\text{ff}} = 14336$ (Mixtral), effective FFN per token = $2 \times 14336 = 28{,}672$ vs a dense model with all 8 experts always = $8 \times 14336 = 114{,}688$.
+Total parameters: 8× more than a single expert, but compute: same as ~2× expert.
+
+**Load balancing loss**: Without it, the router might always pick expert 1 (collapse). An auxiliary loss penalizes uneven expert utilization.
+
+### 9.9 Small Language Models — Quick Reference
+
+A counter-trend to "bigger is better": small models (1–14B) trained on carefully curated data can dramatically outperform their size class.
+
+| Model | Params | Key Innovation | Use Case |
+|-------|--------|---------------|----------|
+| Phi-3 Mini | 3.8B | Synthetic + heavily filtered data ("textbooks") | On-device, reasoning |
+| Phi-3 Medium | 14B | Data curriculum: easy → hard progression | Edge deployment |
+| Gemma 2 2B | 2.6B | Knowledge distillation from larger teacher | Mobile inference |
+| Gemma 2 9B | 9.2B | Local + global alternating attention layers | Mid-range tasks |
+| Gemma 2 27B | 27.2B | Logit soft-capping for training stability | Server, matches Llama 3 70B |
+| SmolLM | 0.1–1.7B | Ultra-compact for edge/browser deployment | Embedded AI |
+
+**Key insight**: Data quality > quantity > model size. Phi-3 Mini (3.8B on 3.3T tokens) matches models 10× its size.
 
 ---
 
-## 12. Architectural Innovations Timeline
+> **Note — Global LLM Landscape**: DeepSeek-R1 and Qwen2.5 demonstrate that non-US labs can match GPT-4 quality. DeepSeek uses MoE with 671B total / 37B active params. Both are open-weights. Key for interviews: awareness that the LLM landscape is now truly global.
+
+---
+
+## 10. Architectural Innovations Timeline
 
 ### 12.1 Chronological Evolution
 
@@ -958,7 +903,7 @@ The differentiation now comes from:
 
 ---
 
-## 13. Interview Questions & Answers
+## 11. Interview Questions & Answers
 
 ### Q1: What are scaling laws? What did Chinchilla show about compute-optimal training?
 

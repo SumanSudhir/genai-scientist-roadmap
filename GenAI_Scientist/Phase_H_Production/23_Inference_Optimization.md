@@ -13,11 +13,10 @@
 10. [Pruning](#10-pruning)
 11. [Batching Strategies](#11-batching-strategies)
 12. [Parallelism for Inference](#12-parallelism-for-inference)
-13. [Serving Frameworks & Deployment](#13-serving-frameworks--deployment)
-14. [Speculative Decoding](#14-speculative-decoding)
-15. [Latency vs Throughput vs Cost](#15-latency-vs-throughput-vs-cost)
-16. [End-to-End: Serving a 70B Model](#16-end-to-end-serving-a-70b-model)
-17. [Interview Questions & Answers](#17-interview-questions--answers)
+13. [Speculative Decoding](#13-speculative-decoding)
+14. [Latency vs Throughput vs Cost](#14-latency-vs-throughput-vs-cost)
+15. [End-to-End: Serving a 70B Model](#15-end-to-end-serving-a-70b-model)
+16. [Interview Questions & Answers](#16-interview-questions--answers)
 
 ---
 
@@ -145,6 +144,39 @@ $$
 | Grouped-Query (GQA) | $n_{\text{groups}}$ | $n_{\text{heads}}/n_{\text{groups}}$× smaller |
 
 This is a primary reason why modern LLMs (Llama 2/3, Mistral) use GQA — it dramatically reduces the KV cache bottleneck at inference.
+
+### KV Cache Memory — Step-by-Step Calculation (7B Model)
+
+**Model**: Llama 2 7B — 32 layers, 32 KV heads (MHA), $d_k = 128$, FP16 (2 bytes)
+
+**Formula**:
+$$
+\text{KV Cache} = 2 \times L \times n_{kv} \times d_k \times T \times \text{bytes}
+$$
+
+**Single request, T=4096 context**:
+$$
+= 2 \times 32 \times 32 \times 128 \times 4096 \times 2 \text{ bytes}
+= 2 \times 32 \times 32 \times 128 \times 4096 \times 2
+$$
+$$
+= 2 \times 32 \times 32 \times 524288 \times 2 = 2,147,483,648 \text{ bytes} = 2.0 \text{ GB}
+$$
+
+Wait, let me recount: $2 \times 32 \times 32 \times 128 = 262,144$. Then $262,144 \times 4096 \times 2 = 2,147,483,648 / 1024^3 = 2.0$ GB per request.
+
+**With GQA (8 KV heads instead of 32)**:
+$$
+= 2 \times 32 \times 8 \times 128 \times 4096 \times 2 = 0.5 \text{ GB per request}
+$$
+**4× smaller** just by switching from MHA to GQA.
+
+**Serving 50 concurrent users (GQA)**:
+$$
+50 \times 0.5 \text{ GB} = 25 \text{ GB KV cache}
+$$
+
+The 7B model weights in FP16 = ~14 GB. So at 50 concurrent users with 4K context, the KV cache (25 GB) **exceeds the model size**. This is why paged attention is critical — you can't just pre-allocate the max.
 
 ---
 
@@ -359,6 +391,48 @@ Symmetric is simpler and faster (no zero-point offset in matmul); asymmetric han
 | Per-group | 1 scale per group of $g$ values (e.g., $g=128$) | Highest | Moderate |
 
 **Per-group quantization** (used by GPTQ, AWQ) is the standard for LLMs — group size 128 provides a good accuracy–overhead trade-off.
+
+### INT8 Quantization — Worked Example
+
+Suppose a weight vector (per-tensor, symmetric):
+
+```
+Original FP32 weights: [0.832, -1.247, 0.063, -0.441, 1.105, -0.918]
+
+Step 1 — Find max absolute value:
+  max(|w|) = 1.247
+
+Step 2 — Compute scale:
+  s = 1.247 / 127 = 0.009819  (INT8 range: -128 to 127)
+
+Step 3 — Quantize each weight:
+  w_q[i] = round(w[i] / s)
+
+  0.832  / 0.009819 = 84.7  → round → 85
+ -1.247  / 0.009819 = -127.0 → round → -127
+  0.063  / 0.009819 = 6.4   → round → 6
+ -0.441  / 0.009819 = -44.9 → round → -45
+  1.105  / 0.009819 = 112.5 → round → 113
+ -0.918  / 0.009819 = -93.5 → round → -94
+
+INT8 weights: [85, -127, 6, -45, 113, -94]  ← stored as int8 (1 byte each)
+
+Step 4 — Dequantize for computation:
+  w_deq[i] = w_q[i] × s
+
+  85  × 0.009819 = 0.8346   (original: 0.832,  error: 0.0026)
+ -127 × 0.009819 = -1.2470  (original: -1.247, error: 0.000 )
+  6   × 0.009819 = 0.0589   (original: 0.063,  error: 0.004 )
+ -45  × 0.009819 = -0.4419  (original: -0.441, error: 0.001 )
+ 113  × 0.009819 = 1.1095   (original: 1.105,  error: 0.005 )
+ -94  × 0.009819 = -0.9230  (original: -0.918, error: 0.005 )
+
+Max quantization error: ~0.005 (< 0.5% of the range)
+```
+
+**Memory savings**: 6 values × 4 bytes (FP32) = 24 bytes → 6 × 1 byte (INT8) = 6 bytes. **4× compression**. At 7B parameters: 28 GB → 7 GB.
+
+**In practice**: MatMul is done in INT8 (fast), then result is dequantized back to FP16/BF16. The scale factor `s` is stored in FP32 (1 extra float per tensor).
 
 ---
 
@@ -770,51 +844,7 @@ Or with quantization:
 
 ---
 
-## 13. Serving Frameworks & Deployment
-
-### Framework Comparison
-
-| Framework | Key Feature | Best For |
-|-----------|------------|----------|
-| **vLLM** | Paged Attention, continuous batching | High-throughput serving |
-| **TGI** (HuggingFace) | Production-ready, Rust backend | HuggingFace ecosystem |
-| **TensorRT-LLM** (NVIDIA) | Deep NVIDIA GPU optimization | Maximum single-GPU perf |
-| **SGLang** | RadixAttention (prefix caching), structured generation | Complex prompting patterns |
-| **llama.cpp** | CPU/Metal inference, GGUF | Edge/local deployment |
-| **Ollama** | User-friendly wrapper around llama.cpp | Local development |
-
-### SGLang's RadixAttention
-
-**Key innovation**: Automatic prefix caching using a **radix tree** (prefix tree) for KV cache reuse:
-
-```
-                    [System Prompt]
-                    /              \
-         [User: "What is"]    [User: "Explain"]
-          /          \               \
-   ["AI?"]     ["ML?"]        ["transformers"]
-```
-
-If multiple requests share the same system prompt, the KV cache for that prefix is computed **once** and reused. This is especially powerful for:
-- Shared system prompts
-- Few-shot examples
-- Multi-turn conversations
-- Tree-of-thought / branching generation
-
-### API Platforms
-
-| Platform | Models | Differentiation |
-|----------|--------|----------------|
-| **OpenAI** | GPT-4o, o1, o3 | First-mover, broadest adoption |
-| **Anthropic** | Claude 4.5/4.6 | Safety focus, long context |
-| **AWS Bedrock** | Multiple providers | Enterprise, VPC integration |
-| **Google Vertex AI** | Gemini family | Multi-modal native |
-| **Together AI** | Open-source models | Cost-effective open-source serving |
-| **Fireworks AI** | Open-source models | Low-latency optimized |
-
----
-
-## 14. Speculative Decoding
+## 13. Speculative Decoding
 
 ### The Insight
 
@@ -871,9 +901,43 @@ With a good draft model ($\alpha \approx 0.8$) and $K = 5$: ~3.4 tokens per targ
 | **EAGLE** | Feature-level draft using target model's hidden states |
 | **Lookahead** | Uses n-gram patterns from Jacobi iteration |
 
+### Speculative Decoding — Worked Acceptance Example
+
+**Setup**: Target model = Llama 70B, Draft model = Llama 7B. Draft K=4 tokens.
+
+```
+Prompt: "The capital of France is"
+
+Step 1 — Draft model generates 4 tokens (4 cheap forward passes):
+  Draft token 1: "Paris"  with q("Paris") = 0.82
+  Draft token 2: "and"    with q("and")   = 0.41
+  Draft token 3: "it"     with q("it")    = 0.33
+  Draft token 4: "is"     with q("is")    = 0.55
+
+Step 2 — Target model evaluates all 4 tokens in ONE forward pass:
+  (processes ["Paris", "and", "it", "is"] in parallel via the attention mask)
+
+  Target probabilities:
+  p("Paris") = 0.91  →  accept prob = min(1, 0.91/0.82) = min(1, 1.11) = 1.00  → ACCEPT ✓
+  p("and")   = 0.12  →  accept prob = min(1, 0.12/0.41) = min(1, 0.29) = 0.29  → REJECT ✗ (with prob 0.71)
+
+Step 3 — Roll dice for "and": random draw = 0.65 > 0.29 → REJECTED
+
+Step 4 — Resample position 2 from residual distribution:
+  p_residual(x) ∝ max(0, p(x) - q(x)) for all x
+  Target says: p("is") = 0.67 >> q("is") = 0.00 → sample "is" from residual
+
+Final result for this step: "Paris is" (2 tokens accepted + 1 resampled)
+vs. standard decoding: 1 token per target forward pass
+
+Net gain: 3 tokens using 1 target forward pass instead of 3 sequential passes
+```
+
+**Key insight**: Even when a draft token is rejected, we still get a correct sample (from the residual distribution). The output distribution is **identical** to running only the 70B model — no quality loss.
+
 ---
 
-## 15. Latency vs Throughput vs Cost
+## 14. Latency vs Throughput vs Cost
 
 ### The Three-Way Trade-Off
 
@@ -925,7 +989,7 @@ graph TD
 
 ---
 
-## 16. End-to-End: Serving a 70B Model
+## 15. End-to-End: Key Design Decisions for a 70B Model
 
 ### Step 1: Hardware Sizing
 
@@ -983,7 +1047,7 @@ Key metrics to track:
 
 ---
 
-## 17. Interview Questions & Answers
+## 16. Interview Questions & Answers
 
 ### Q1: How does Flash Attention reduce memory from O(n²) to O(n)? What is the key insight?
 

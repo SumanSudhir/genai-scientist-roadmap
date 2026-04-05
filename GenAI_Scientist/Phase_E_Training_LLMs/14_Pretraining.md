@@ -12,19 +12,15 @@
 4. [Span Corruption & Prefix LM](#4-span-corruption--prefix-lm)
 5. [Comparing Objectives — When to Use What](#5-comparing-objectives)
 6. [Data Pipeline — Sources & Scale](#6-data-pipeline)
-7. [Data Filtering & Quality](#7-data-filtering--quality)
-8. [Deduplication — MinHash & Beyond](#8-deduplication)
-9. [Data Mixing Ratios](#9-data-mixing-ratios)
-10. [Tokenizer Training](#10-tokenizer-training)
-11. [Distributed Training — Parallelism Strategies](#11-distributed-training)
-12. [ZeRO — Zero Redundancy Optimizer](#12-zero)
-13. [FSDP — Fully Sharded Data Parallel](#13-fsdp)
-14. [Mixed Precision Training](#14-mixed-precision)
-15. [Training Stability & Hyperparameters](#15-training-stability)
-16. [Compute Requirements & Scaling Laws](#16-compute-scaling)
-17. [Training Infrastructure](#17-training-infrastructure)
-18. [Training Recipes — Putting It All Together](#18-training-recipes)
-19. [Interview Questions & Answers](#19-interview-qa)
+7. [Data Mixing Ratios](#7-data-mixing-ratios)
+8. [Distributed Training — Parallelism Strategies](#8-distributed-training)
+9. [ZeRO — Zero Redundancy Optimizer](#9-zero)
+10. [FSDP — Fully Sharded Data Parallel](#10-fsdp)
+11. [Mixed Precision Training](#11-mixed-precision)
+12. [Training Stability & Hyperparameters](#12-training-stability)
+13. [Compute Requirements & Scaling Laws](#13-compute-scaling)
+14. [Training Recipes — Putting It All Together](#14-training-recipes)
+15. [Interview Questions & Answers](#15-interview-qa)
 
 ---
 
@@ -112,6 +108,29 @@ Interpretation: the model's average "surprise" per token. Lower is better.
 - PPL = $|V|$: random guessing
 - GPT-3 (175B): PPL $\approx$ 20 on Pile
 - Llama 3 (70B): PPL $\approx$ 6-8 on held-out web text
+
+### 2.5 CLM Loss — Worked Numerical Example
+
+Sentence: "The cat sat" (3 tokens after BPE). Token IDs: The=1, cat=521, sat=1832.
+
+**Forward pass** — predict each token from its prefix:
+
+```
+Position 1: P(The | <BOS>)       = 0.0012  → loss₁ = -log(0.0012) = 6.73 nats
+Position 2: P(cat | The)         = 0.0850  → loss₂ = -log(0.0850) = 2.47 nats
+Position 3: P(sat | The cat)     = 0.1200  → loss₃ = -log(0.1200) = 2.12 nats
+```
+
+**Per-token cross-entropy loss** = average over all positions:
+
+$$L = (6.73 + 2.47 + 2.12) / 3 = 3.77 \text{ nats}$$
+
+**Perplexity** $= \exp(L) = \exp(3.77) \approx 43.4$
+
+Interpretation: on average, the model is as uncertain as choosing uniformly from 43 tokens.
+A well-trained GPT-2 on standard English text achieves PPL ≈ 20-30.
+
+**What training does**: Over millions of sequences, the model learns to give higher probability to the actual next token. After training: $P(\text{cat} \mid \text{The})$ might become 0.25, giving PPL contribution $\approx \exp(1.39) \approx 4$.
 
 ---
 
@@ -297,105 +316,11 @@ flowchart TD
 
 ---
 
-## 7. Data Filtering & Quality
-
-Raw web data is noisy. Filtering is as important as model architecture.
-
-### 7.1 Heuristic Filters
-
-These are rule-based filters applied before any ML-based quality scoring:
-
-| Filter | What It Catches | Typical Threshold |
-|--------|----------------|-------------------|
-| Word count | Too short/long documents | 50–100,000 words |
-| Symbol ratio | Boilerplate, code dumps | $< 10\%$ non-alphanumeric |
-| Repetition ratio | Repeated phrases/spam | $< 30\%$ duplicate n-grams |
-| Language score | Non-target language | fastText confidence $> 0.65$ |
-| Perplexity | Low-quality/gibberish text | KenLM perplexity $< \tau$ |
-| Blocklist | URLs, domains to exclude | Adult sites, spam farms |
-
-### 7.2 Classifier-Based Filtering
-
-Train a quality classifier on curated "high-quality" data (Wikipedia, books) vs random web data:
-
-$$P(\text{high quality} \mid \text{document}) = \sigma(f_\theta(\text{document}))$$
-
-**Approaches**:
-- **GPT-3 approach**: Trained a binary classifier on curated vs random data. Upsampled documents with high quality score.
-- **Llama approach**: Used a fastText classifier trained on Wikipedia references. Documents referenced by Wikipedia are higher quality.
-- **FineWeb**: Multi-stage filtering with both heuristic and learned filters, achieving better data quality at scale.
-
-### 7.3 The Quality-Diversity Trade-off
-
-$$\text{Model quality} \propto f(\text{data quality}, \text{data diversity}, \text{data quantity})$$
-
-Aggressive filtering improves quality but reduces diversity. Models trained on only high-quality data (e.g., Wikipedia + books) are fluent but narrow. The optimal approach:
-
-1. Filter aggressively for quality on the **web** portion
-2. Keep diverse sources (code, scientific papers, books) at lower filtering thresholds
-3. Use data mixing ratios (Section 9) to balance quality and coverage
-
----
-
-## 8. Deduplication — MinHash & Beyond
-
-Duplicate data in training causes:
-- Memorization of specific passages (privacy risk)
-- Overweighting of repeated content (biased model)
-- Wasted compute (training on the same data twice)
-
-### 8.1 Exact Deduplication
-
-Remove documents with identical content (after normalization):
-1. Normalize whitespace, lowercasing, remove punctuation
-2. Hash the normalized string (SHA-256 or similar)
-3. Remove documents with duplicate hashes
-
-**Limitation**: Misses near-duplicates (same content with minor edits).
-
-### 8.2 MinHash — Fuzzy Deduplication
-
-MinHash estimates Jaccard similarity between document shingle sets without comparing all pairs.
-
-**Jaccard similarity** between documents $A$ and $B$ (as sets of n-gram shingles):
-
-$$J(A, B) = \frac{|A \cap B|}{|A \cup B|}$$
-
-**MinHash algorithm**:
-1. Convert each document to a set of character n-grams (shingles), typically $n = 5$
-2. Apply $k$ random hash functions $h_1, \ldots, h_k$ to each shingle set
-3. For each hash function $h_i$, the MinHash signature is $\min_{s \in \text{shingles}} h_i(s)$
-4. The MinHash signature is a vector of $k$ values: $\text{sig}(A) = [\min h_1(A), \ldots, \min h_k(A)]$
-
-**Key property**: The probability that two documents share a MinHash value equals their Jaccard similarity:
-
-$$P(\min h(A) = \min h(B)) = J(A, B)$$
-
-**Locality-Sensitive Hashing (LSH)** for scalability:
-1. Divide the $k$ MinHash values into $b$ bands of $r$ rows each ($k = b \times r$)
-2. Two documents are candidate duplicates if they hash to the same bucket in **any** band
-3. Tune $b$ and $r$ to control the threshold: approximate threshold $\approx (1/b)^{1/r}$
-
-For example, with $k = 128$, $b = 16$, $r = 8$: the threshold is approximately $(1/16)^{1/8} \approx 0.6$, meaning documents with Jaccard similarity $> 0.6$ will likely be detected.
-
-### 8.3 Deduplication at Scale
-
-| Method | Comparison Scope | Catches | Cost |
-|--------|-----------------|---------|------|
-| Exact (hash) | Full document | Exact copies | $O(n)$ |
-| MinHash + LSH | Full document | Near-duplicates | $O(n)$ with LSH |
-| Suffix array | Substring level | Repeated passages | $O(n \log n)$ |
-| SemDedup | Semantic level | Paraphrases | $O(n \cdot d)$ |
-
-**Llama 3's approach**: Aggressive deduplication at multiple levels — URL-level exact dedup, then MinHash for near-dedup, followed by line-level dedup for very common boilerplate.
-
----
-
-## 9. Data Mixing Ratios
+## 7. Data Mixing Ratios
 
 The proportion of each data source significantly affects model capabilities.
 
-### 9.1 Known Mixing Ratios
+### 7.1 Known Mixing Ratios
 
 | Model | Web | Code | Books | Wiki | Papers | Other |
 |-------|-----|------|-------|------|--------|-------|
@@ -403,7 +328,7 @@ The proportion of each data source significantly affects model capabilities.
 | Llama 3 | 50% | 17% | 8% | 4% | 6% | 15% |
 | Chinchilla | ~70% | — | ~10% | ~5% | — | ~15% |
 
-### 9.2 Why Mixing Ratios Matter
+### 7.2 Why Mixing Ratios Matter
 
 Each source contributes different capabilities:
 
@@ -413,7 +338,7 @@ Each source contributes different capabilities:
 - **Scientific papers** ($\uparrow$): Improves technical reasoning
 - **Web** ($\uparrow$): Breadth of knowledge, conversational ability
 
-### 9.3 Curriculum Learning — Data Ordering
+### 7.3 Curriculum Learning — Data Ordering
 
 Some models use non-uniform data ordering during training:
 
@@ -429,55 +354,11 @@ where $w_i$ is the weight for domain $i$, and the objective minimizes the worst-
 
 ---
 
-## 10. Tokenizer Training
-
-The tokenizer is trained **before** the model and remains fixed throughout pretraining.
-
-### 10.1 When to Train a Custom Tokenizer
-
-| Scenario | Recommendation |
-|----------|---------------|
-| Training in English on web data | Use existing (Llama, GPT-4 tokenizer) |
-| Multilingual model | Train new — need balanced vocab across languages |
-| Domain-specific (medical, legal) | Train new — domain terms should be single tokens |
-| Code-heavy model | Train new or extend — ensure code-specific tokens |
-
-### 10.2 Tokenizer Design Decisions
-
-**Vocabulary size** $|V|$:
-- Larger vocab: fewer tokens per text (faster inference), but larger embedding matrix ($|V| \times d$)
-- Smaller vocab: more tokens per text (slower), but smaller model
-- Sweet spot: 32K–128K tokens
-
-$$\text{Embedding parameters} = |V| \times d_{\text{model}}$$
-
-For $|V| = 128K$, $d = 4096$: that's $\sim 0.5B$ parameters just for embeddings.
-
-**Byte-level BPE** (used by GPT-2, Llama, Mistral): Operates on bytes, not characters. Handles any Unicode without unknown tokens.
-
-**SentencePiece** (used by T5, Llama): Language-agnostic — treats text as raw bytes/characters. No need for pre-tokenization rules.
-
-### 10.3 Fertility and Efficiency
-
-**Fertility** = average number of tokens per word. Lower is better.
-
-$$\text{Fertility} = \frac{\text{number of tokens}}{\text{number of words}}$$
-
-| Tokenizer | English Fertility | Chinese Fertility | Code Fertility |
-|-----------|------------------|-------------------|----------------|
-| GPT-2 (50K) | ~1.3 | ~3.5 | ~2.0 |
-| Llama 2 (32K) | ~1.3 | ~3.8 | ~2.2 |
-| Llama 3 (128K) | ~1.2 | ~1.8 | ~1.5 |
-
-Llama 3's larger vocabulary dramatically reduces fertility for non-English languages and code, making the model more efficient (fewer tokens = fewer forward passes = faster inference).
-
----
-
-## 11. Distributed Training — Parallelism Strategies
+## 8. Distributed Training — Parallelism Strategies
 
 Modern LLMs don't fit on a single GPU. Distributed training splits the model, data, or both across many devices.
 
-### 11.1 Data Parallelism (DP)
+### 8.1 Data Parallelism (DP)
 
 The simplest strategy: replicate the full model on each GPU, split the data batch.
 
@@ -502,7 +383,7 @@ $$\text{Memory} \approx 70B \times 2 \text{ bytes} = 140 \text{ GB (weights alon
 
 Plus optimizer states (Adam: $2 \times$ model size), gradients ($1 \times$), activations: total $\sim 4\text{-}6 \times$ model size = 560–840 GB. No single GPU can hold this.
 
-### 11.2 Tensor Parallelism (TP)
+### 8.2 Tensor Parallelism (TP)
 
 Split individual layers across GPUs. Each GPU holds a **shard** of every layer.
 
@@ -536,7 +417,7 @@ Tensor Parallelism for Attention (2 GPUs):
 
 **Trade-off**: Requires communication at every layer (all-reduce). Best within a single node (fast NVLink interconnect). Typical: TP = 4 or 8 (within one node).
 
-### 11.3 Pipeline Parallelism (PP)
+### 8.3 Pipeline Parallelism (PP)
 
 Split the model by **layers**. Each GPU holds a subset of consecutive layers.
 
@@ -562,7 +443,7 @@ $$\text{Bubble fraction} = \frac{p - 1}{m + p - 1}$$
 
 For $p = 4, m = 16$: bubble $= 3/19 \approx 16\%$. Increasing micro-batches reduces the bubble.
 
-### 11.4 3D Parallelism
+### 8.4 3D Parallelism
 
 Production LLM training combines all three:
 
@@ -600,13 +481,59 @@ flowchart TD
     end
 ```
 
+### 8.5 Parallelism Strategies — Which Tensors Are Split
+
+For a 70B model on 8 GPUs:
+
+**Data Parallelism (DP)**:
+
+```
+Same model on each GPU, different data batches.
+Each GPU: full 70B parameters (140 GB in fp16 — doesn't fit on 1 GPU!)
+Use case: model fits on one GPU, want larger effective batch size.
+```
+
+**Tensor Parallelism (TP)** — split weight matrices across GPUs:
+
+```
+Each linear layer is split: GPU0 has columns 0..d/2, GPU1 has d/2..d
+Output requires AllReduce after each layer
+Memory: 70B/8 = 8.75B params per GPU (17.5 GB)  ✓
+Communication: one AllReduce per transformer sublayer (expensive!)
+```
+
+**Pipeline Parallelism (PP)** — split layers across GPUs:
+
+```
+GPU0: layers 1-10, GPU1: layers 11-20, ...
+Forward: pass activations sequentially GPU0→GPU1→...→GPU7
+Backward: gradients flow back in reverse
+Problem: "pipeline bubble" — GPUs idle while waiting for their stage
+```
+
+**In practice** (70B training on 8×H100s):
+
+```
+Combine TP=4 + PP=2:
+  Each node of 4 GPUs does tensor parallelism (within-node, fast NVLink)
+  Nodes are connected via pipeline parallelism (across-node, slower InfiniBand)
+  + ZeRO Stage 1/2 for optimizer state sharding
+```
+
+| Strategy | Splits | Memory saving | Communication | Use when |
+|----------|--------|--------------|---------------|----------|
+| DP | Data batch | None (for params) | AllReduce grads | Model fits on GPU |
+| TP | Weight matrices | ~1/N per GPU | AllReduce per layer | Intra-node (NVLink) |
+| PP | Model layers | ~1/N per GPU | Activations (cheap) | Cross-node |
+| ZeRO-3 | Params+grads+opt | ~1/N per GPU | AllGather params | Single large cluster |
+
 ---
 
-## 12. ZeRO — Zero Redundancy Optimizer
+## 9. ZeRO — Zero Redundancy Optimizer
 
 DeepSpeed's ZeRO (Rajbhandari et al., 2020) reduces memory redundancy in data parallelism by sharding optimizer states, gradients, and parameters across GPUs.
 
-### 12.1 Memory Breakdown for a Model with $\Psi$ Parameters
+### 9.1 Memory Breakdown for a Model with $\Psi$ Parameters
 
 With mixed precision training (FP16 forward/backward, FP32 optimizer):
 
@@ -619,7 +546,7 @@ With mixed precision training (FP16 forward/backward, FP32 optimizer):
 
 For a 7B model: $16 \times 7B = 112$ GB — already beyond a single 80GB A100.
 
-### 12.2 ZeRO Stages
+### 9.2 ZeRO Stages
 
 $$\text{ZeRO-1: Shard optimizer states} \quad \rightarrow \quad \text{Memory: } 4\Psi + \frac{12\Psi}{N_d}$$
 
@@ -638,7 +565,50 @@ ZeRO Stage 2:   26 GB per GPU  ✓
 ZeRO Stage 3:   14 GB per GPU  ✓ (plenty of room for activations)
 ```
 
-### 12.3 Communication Cost
+### 9.2a ZeRO Stages — Memory Breakdown (Worked Example)
+
+Training a 7B parameter model in fp16 with AdamW:
+
+**Memory per parameter** (without ZeRO):
+
+```
+Parameters:       7B × 2 bytes (fp16)              = 14 GB
+Gradients:        7B × 2 bytes (fp16)              = 14 GB
+Optimizer states: 7B × 8 bytes (fp32 params+m+v)  = 56 GB
+Total per GPU:    84 GB  (over H100's 80 GB limit!)
+```
+
+**ZeRO Stage 1** — shard optimizer states across N GPUs:
+
+```
+Parameters: 14 GB  (replicated on all GPUs)
+Gradients:  14 GB  (replicated)
+Optimizer:  56/N GB (sharded)
+→ With N=8 GPUs: 14 + 14 + 7 = 35 GB per GPU  ✓
+```
+
+**ZeRO Stage 2** — shard optimizer states + gradients:
+
+```
+Parameters: 14 GB  (replicated)
+Gradients:  14/N GB (sharded)
+Optimizer:  56/N GB (sharded)
+→ With N=8 GPUs: 14 + 1.75 + 7 = 22.75 GB per GPU  ✓
+```
+
+**ZeRO Stage 3** — shard everything:
+
+```
+Parameters: 14/N GB (sharded, gathered on demand)
+Gradients:  14/N GB (sharded)
+Optimizer:  56/N GB (sharded)
+→ With N=8 GPUs:  1.75 + 1.75 + 7  = 10.5 GB per GPU  ✓
+→ With N=64 GPUs: could train a 7B model on 8 GB cards!
+```
+
+**Trade-off**: Stage 3 requires all-gather operations to reconstruct parameters during forward/backward. Communication overhead increases with model size and decreases with interconnect bandwidth.
+
+### 9.3 Communication Cost
 
 | Stage | Communication Volume (per step) | When |
 |-------|-------------------------------|------|
@@ -651,11 +621,11 @@ ZeRO-3 has 1.5× the communication of standard DP but enables training models $N
 
 ---
 
-## 13. FSDP — Fully Sharded Data Parallel
+## 10. FSDP — Fully Sharded Data Parallel
 
 PyTorch's native implementation of ZeRO Stage 3. Each GPU holds only a shard of parameters, gradients, and optimizer states.
 
-### 13.1 FSDP vs ZeRO-3
+### 10.1 FSDP vs ZeRO-3
 
 | Feature | DeepSpeed ZeRO-3 | PyTorch FSDP |
 |---------|------------------|--------------|
@@ -666,7 +636,7 @@ PyTorch's native implementation of ZeRO Stage 3. Each GPU holds only a shard of 
 | Activation checkpointing | Built-in | Built-in |
 | Ease of use | Config-driven | API-driven |
 
-### 13.2 How FSDP Works
+### 10.2 How FSDP Works
 
 1. **Initialization**: Each GPU stores only $1/N_d$ of all parameters
 2. **Forward pass**: Before each layer's forward, all-gather its full parameters from all GPUs. Compute. Then discard non-local shards.
@@ -679,11 +649,11 @@ The $\Psi_{\text{largest unit}} \cdot 2$ term is because during forward/backward
 
 ---
 
-## 14. Mixed Precision Training
+## 11. Mixed Precision Training
 
 Train with lower-precision numbers to save memory and increase throughput.
 
-### 14.1 Numerical Formats
+### 11.1 Numerical Formats
 
 | Format | Bits | Exponent | Mantissa | Range | Precision |
 |--------|------|----------|----------|-------|-----------|
@@ -692,7 +662,7 @@ Train with lower-precision numbers to save memory and increase throughput.
 | BF16 | 16 | 8 | 7 | $\pm 3.4 \times 10^{38}$ | Lower |
 | FP8 (E4M3) | 8 | 4 | 3 | $\pm 448$ | Low |
 
-### 14.2 Why BF16 > FP16 for LLM Training
+### 11.2 Why BF16 > FP16 for LLM Training
 
 FP16 has a narrow dynamic range (max 65504). During training, activations and gradients can overflow:
 
@@ -707,7 +677,7 @@ This means BF16 almost never overflows, eliminating the need for loss scaling. T
 - Master weights are kept in FP32 for the optimizer step
 - The gradient noise typically exceeds the quantization error
 
-### 14.3 Mixed Precision Recipe
+### 11.3 Mixed Precision Recipe
 
 $$\text{Forward/backward: BF16} \quad \xrightarrow{\text{gradients}} \quad \text{Optimizer step: FP32} \quad \xrightarrow{\text{cast down}} \quad \text{BF16 weights}$$
 
@@ -720,7 +690,7 @@ $$\text{Forward/backward: BF16} \quad \xrightarrow{\text{gradients}} \quad \text
 
 **Memory savings**: Parameters in BF16 = $2\Psi$ (vs $4\Psi$ for FP32). But optimizer states remain in FP32 ($12\Psi$), so total is $2\Psi + 2\Psi + 12\Psi = 16\Psi$ (same total, but activations are halved, and forward pass is $2\times$ faster).
 
-### 14.4 Loss Scaling (FP16 only)
+### 11.4 Loss Scaling (FP16 only)
 
 If using FP16 instead of BF16, small gradients underflow to zero. Fix: scale the loss before backward, then unscale gradients before the optimizer step:
 
@@ -730,9 +700,9 @@ Dynamic loss scaling: start with $S = 2^{16}$, halve on NaN/Inf, double every $K
 
 ---
 
-## 15. Training Stability & Hyperparameters
+## 12. Training Stability & Hyperparameters
 
-### 15.1 Critical Hyperparameters
+### 12.1 Critical Hyperparameters
 
 | Hyperparameter | Typical Value | Effect |
 |---------------|--------------|--------|
@@ -744,7 +714,7 @@ Dynamic loss scaling: start with $S = 2^{16}$, halve on NaN/Inf, double every $K
 | Adam $\beta_1, \beta_2$ | 0.9, 0.95 | Momentum and variance tracking |
 | Adam $\epsilon$ | $10^{-8}$ | Numerical stability |
 
-### 15.2 Learning Rate Schedule
+### 12.2 Learning Rate Schedule
 
 The standard schedule for LLM pretraining is **warmup + cosine decay**:
 
@@ -769,7 +739,7 @@ Learning Rate Schedule:
   0    T_warmup                T_total
 ```
 
-### 15.3 Gradient Clipping
+### 12.3 Gradient Clipping
 
 Clip the global gradient norm to prevent exploding gradients:
 
@@ -777,7 +747,7 @@ $$\hat{g} = \begin{cases} g & \text{if } \|g\| \leq c \\ c \cdot \frac{g}{\|g\|}
 
 where $c = 1.0$ is standard. This preserves gradient direction but limits magnitude.
 
-### 15.4 Common Training Failures
+### 12.4 Common Training Failures
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -802,7 +772,7 @@ where $c = 1.0$ is standard. This preserves gradient direction but limits magnit
 └─────────────────────┴──────────────────────────────────────────┘
 ```
 
-### 15.5 Loss Spikes and Recovery
+### 12.5 Loss Spikes and Recovery
 
 Most large training runs encounter loss spikes — sudden increases in loss followed by recovery. The standard mitigation:
 
@@ -814,9 +784,9 @@ Llama 2's training report documents multiple loss spikes during the 2T token run
 
 ---
 
-## 16. Compute Requirements & Scaling Laws
+## 13. Compute Requirements & Scaling Laws
 
-### 16.1 FLOPs Estimation
+### 13.1 FLOPs Estimation
 
 For a transformer with $N$ parameters trained on $D$ tokens:
 
@@ -830,7 +800,7 @@ The factor of 6 comes from:
 
 $$C = 6 \times 70 \times 10^9 \times 2 \times 10^{12} = 8.4 \times 10^{23} \text{ FLOPs}$$
 
-### 16.2 GPU-Hours and Cost
+### 13.2 GPU-Hours and Cost
 
 An NVIDIA A100 achieves approximately $312$ TFLOP/s in BF16. Assuming 50% Model FLOPs Utilization (MFU):
 
@@ -838,7 +808,7 @@ $$\text{GPU-hours} = \frac{C}{\text{TFLOP/s} \times \text{MFU} \times 3600} = \f
 
 At $\sim \$2$/A100-hour (cloud pricing), that's approximately $\$3M$ in compute.
 
-### 16.3 Chinchilla Scaling Laws
+### 13.3 Chinchilla Scaling Laws
 
 Hoffmann et al. (2022) fit the relationship between loss, model size, and data:
 
@@ -858,7 +828,7 @@ $$D_{\text{opt}} \approx 20 \times N$$
 - GPT-3 (175B params, 300B tokens) was significantly undertrained ($D/N = 1.7$)
 - Chinchilla (70B params, 1.4T tokens) matched GPT-3's performance with 4× fewer parameters ($D/N = 20$)
 
-### 16.4 Post-Chinchilla: Inference-Optimal Scaling
+### 13.4 Post-Chinchilla: Inference-Optimal Scaling
 
 Chinchilla optimizes for training compute. But in production, **inference cost dominates**. A smaller model trained longer is cheaper to serve:
 
@@ -868,64 +838,9 @@ For high-traffic applications, it's worth spending more on training (more tokens
 
 ---
 
-## 17. Training Infrastructure
+## 14. Training Recipes — Putting It All Together
 
-### 17.1 Hardware Landscape
-
-| Accelerator | Memory | BF16 TFLOP/s | Interconnect | Typical Use |
-|------------|--------|-------------|--------------|-------------|
-| NVIDIA A100 | 80 GB | 312 | NVLink 600 GB/s | Standard LLM training |
-| NVIDIA H100 | 80 GB | 989 | NVLink 900 GB/s | Current generation |
-| NVIDIA B200 | 192 GB | 2,250 | NVLink 1,800 GB/s | Next generation |
-| Google TPU v4 | 32 GB HBM | ~275 | ICI 4,800 GB/s | Google-internal |
-| Google TPU v5e | 16 GB HBM | ~197 | ICI | Cost-optimized |
-
-### 17.2 Communication Topology
-
-```
-Intra-Node (NVLink — very fast):
-┌──────────────────────────────────────┐
-│ Node: 8× H100 GPUs                   │
-│ GPU0 ↔ GPU1 ↔ GPU2 ↔ GPU3           │
-│  ↕       ↕       ↕       ↕          │
-│ GPU4 ↔ GPU5 ↔ GPU6 ↔ GPU7           │
-│                                      │
-│ NVLink: 900 GB/s bidirectional       │
-└──────────────────────────────────────┘
-
-Inter-Node (InfiniBand — slower):
-┌──────────┐  InfiniBand   ┌──────────┐
-│  Node 0  │←──400 Gb/s──→│  Node 1  │
-└──────────┘               └──────────┘
-      ↑                          ↑
-      └────── 400 Gb/s ─────────┘
-                                 ↓
-                          ┌──────────┐
-                          │  Node 2  │
-                          └──────────┘
-```
-
-**Design principle**: Put communication-heavy parallelism (TP) within nodes (fast NVLink), and communication-light parallelism (DP, PP) across nodes (slower InfiniBand).
-
-### 17.3 Model FLOPs Utilization (MFU)
-
-MFU measures what fraction of theoretical hardware performance is achieved:
-
-$$\text{MFU} = \frac{\text{Observed throughput (tokens/sec)} \times 6N}{\text{Peak TFLOP/s per GPU} \times \text{num GPUs} \times 10^{12}}$$
-
-| System | MFU | Notes |
-|--------|-----|-------|
-| Naive implementation | 20-30% | Communication bottleneck |
-| Well-optimized (Megatron) | 40-55% | 3D parallelism, overlap |
-| State-of-the-art | 55-65% | Communication/compute overlap, custom kernels |
-
-Getting from 30% to 55% MFU means training is $\sim 2\times$ faster (or half the cost).
-
----
-
-## 18. Training Recipes — Putting It All Together
-
-### 18.1 Llama 3 Training Recipe
+### 14.1 Llama 3 Training Recipe
 
 A concrete example combining all concepts:
 
@@ -952,7 +867,7 @@ Gradient clipping: 1.0
 Training time: ~54 days
 ```
 
-### 18.2 General Recipe Template
+### 14.2 General Recipe Template
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -999,7 +914,7 @@ Training time: ~54 days
 └──────────────────────────────────────────────────────────┘
 ```
 
-### 18.3 Training Stages
+### 14.3 Training Stages
 
 Modern LLMs use a multi-stage approach:
 
@@ -1014,7 +929,7 @@ Stages 1-2 teach the model **knowledge**. Stages 3-4 teach it **behavior** (how 
 
 ---
 
-## 19. Interview Questions & Answers
+## 15. Interview Questions & Answers
 
 ### Q1: How do you estimate the FLOPs needed to train a 70B parameter model on 2T tokens?
 

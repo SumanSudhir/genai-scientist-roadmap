@@ -18,12 +18,9 @@
 5. [Reflexion — Self-Reflective Agents](#5-reflexion--self-reflective-agents)
 6. [Memory Systems for Agents](#6-memory-systems-for-agents)
 7. [Multi-Agent Systems](#7-multi-agent-systems)
-8. [Code Generation Agents](#8-code-generation-agents)
-9. [Agent Evaluation](#9-agent-evaluation)
-10. [Frameworks & Implementation](#10-frameworks--implementation)
-11. [Failure Modes & Limitations](#11-failure-modes--limitations)
-12. [The Future of Agents (2025-2026)](#12-the-future-of-agents-2025-2026)
-13. [Interview Questions & Answers](#13-interview-questions--answers)
+8. [Agent Evaluation](#8-agent-evaluation)
+9. [Failure Modes & Limitations](#9-failure-modes--limitations)
+10. [Interview Questions & Answers](#10-interview-questions--answers)
 
 ---
 
@@ -272,6 +269,27 @@ ReAct = CoT + tool use. The reasoning is "grounded" by real observations from th
 2. **Context accumulation**: Each step adds to the context window. Long chains can exhaust the context or cause "lost in the middle" effects.
 3. **Greedy search**: ReAct commits to each action — no backtracking if a step leads to a dead end.
 4. **Dependent on tool quality**: The agent is only as good as its tools. A bad search API produces bad observations.
+
+### 3.6 ReAct — Simple Trace (Interview-Ready Example)
+
+Question: "What is the population of the capital city of France?"
+
+```
+Thought 1: I need to identify the capital of France first.
+Action 1:  search("capital of France")
+Obs 1:     "Paris is the capital of France."
+
+Thought 2: Now I need Paris's population.
+Action 2:  search("Paris population 2024")
+Obs 2:     "Paris city proper: ~2.1 million. Greater metro: ~12 million."
+
+Thought 3: I have the answer.
+Action 3:  finish("The population of Paris (capital of France) is ~2.1M city proper.")
+```
+
+**Why ReAct beats direct generation**: A naive LLM might answer "Paris has 2.2 million" from training data (possibly stale). ReAct grounds the answer in a real tool call — verifiable, updatable, trustworthy.
+
+**Failure mode to mention in interviews**: If Observation 2 had returned an error, the agent would need a fallback (try a different query, use a different tool, or report uncertainty). Without explicit error-handling in the prompt, many agents loop or hallucinate observations.
 
 ---
 
@@ -623,103 +641,47 @@ Agent C ◄──► Agent D
 | Sub-tasks can run in parallel | Tasks are inherently sequential |
 | System needs checks and balances | Trust in single model is sufficient |
 
----
+### 7.X Multi-Agent Architecture — Concrete Example
 
-## 8. Code Generation Agents
-
-### 8.1 Why Code Agents Are Special
-
-Code generation is the most natural domain for agents because code has:
-
-1. **Automatic evaluation**: Unit tests provide unambiguous success/failure signals
-2. **Rich tool ecosystem**: File systems, compilers, debuggers, test runners, linters
-3. **Structured output**: Code is formally structured — easier for models to generate than free-form text
-4. **Iterative improvement**: Write → test → debug → fix is a natural agent loop
-
-### 8.2 The Code Agent Loop
+**Task**: "Research the latest AI papers and write a summary blog post"
 
 ```
-Task: "Write a function to merge two sorted linked lists"
-        │
-        ▼
-   ┌──────────┐
-   │  Plan    │ ── Understand requirements, design approach
-   └────┬─────┘
-        │
-        ▼
-   ┌──────────┐
-   │  Write   │ ── Generate code
-   └────┬─────┘
-        │
-        ▼
-   ┌──────────┐
-   │  Test    │ ── Run unit tests / execute code
-   └────┬─────┘
-        │
-   Pass? ──Yes──► Done
-        │
-       No
-        │
-        ▼
-   ┌──────────┐
-   │  Debug   │ ── Analyze error, read traceback
-   └────┬─────┘
-        │
-        ▼
-   ┌──────────┐
-   │  Fix     │ ── Modify code based on diagnosis
-   └────┬─────┘
-        │
-        └──► Back to Test
+User
+  ↓ task
+Orchestrator Agent
+  ├── Research Agent
+  │     ├── tool: web_search("latest AI papers 2024")
+  │     ├── tool: arxiv_search("transformers 2024")
+  │     └── returns: list of papers + summaries
+  │
+  ├── Critic Agent
+  │     ├── receives: Research Agent output
+  │     ├── evaluates: relevance, recency, accuracy
+  │     └── returns: approved papers + feedback
+  │
+  └── Writer Agent
+        ├── receives: approved papers from Critic
+        └── returns: final blog post
+  ↓
+User receives blog post
 ```
 
-### 8.3 Tools for Code Agents
+**Key design decisions**:
+- Orchestrator routes tasks; specialized agents focus on one thing each
+- Critic Agent prevents low-quality research from propagating downstream
+- Research and other setup steps can run in parallel where there's no dependency
+- Each agent has a focused, limited context — not everything in one prompt
 
-| Tool | Purpose |
-|------|---------|
-| **File read/write** | Read existing code, write new code |
-| **Shell execution** | Run scripts, install dependencies, execute commands |
-| **Test runner** | Run unit tests, integration tests |
-| **Linter/formatter** | Check code style, find potential bugs |
-| **Search (codebase)** | Find relevant functions, classes, patterns |
-| **Search (web/docs)** | Look up API documentation, Stack Overflow |
-| **Git operations** | Commit, branch, diff, blame |
-| **Debugger** | Set breakpoints, inspect variables, step through code |
-
-### 8.4 Notable Code Agents
-
-| Agent | Key Feature |
-|-------|------------|
-| **Devin** (Cognition, 2024) | Full software engineering agent with sandboxed environment |
-| **SWE-Agent** (Princeton) | Terminal + file editor interface for resolving GitHub issues |
-| **OpenHands** (formerly OpenDevin) | Open-source, sandboxed code agent |
-| **Aider** | CLI pair programming agent |
-| **Claude Code** (Anthropic) | Terminal-based coding agent with tool use |
-| **Cursor / Copilot** | IDE-integrated coding assistants with agent-like features |
-
-### 8.5 SWE-bench: The Standard Benchmark
-
-**SWE-bench** (Jimenez et al., 2024) evaluates code agents on real GitHub issues:
-
-- 2,294 real issue-PR pairs from 12 popular Python repositories
-- Agent must: read the issue, explore the codebase, write a patch, pass the existing tests
-- **SWE-bench Lite**: 300 instance subset for faster evaluation
-
-| Agent | SWE-bench Lite (% resolved) |
-|-------|----------------------------|
-| Claude 3.5 Sonnet + simple scaffolding | ~49% |
-| OpenHands + Claude 3.5 Sonnet | ~53% |
-| Devin | ~14% (initial) → improving |
-| SWE-Agent + GPT-4 | ~18% |
-| Amazon Q Developer Agent | ~38% |
-
-Performance is improving rapidly. The gap between AI and human software engineers is narrowing for well-defined tasks.
+**Communication patterns**:
+- **Hub-and-spoke** (above): Orchestrator routes everything — simple but bottleneck
+- **Peer-to-peer**: Agents communicate directly — complex but parallelizable
+- **Blackboard**: Shared state all agents read/write — good for incremental refinement
 
 ---
 
-## 9. Agent Evaluation
+## 8. Agent Evaluation
 
-### 9.1 Why Agent Evaluation Is Hard
+### 8.1 Why Agent Evaluation Is Hard
 
 Agents operate in open-ended environments with:
 - Variable-length execution trajectories
@@ -727,7 +689,7 @@ Agents operate in open-ended environments with:
 - Multiple valid approaches to the same task
 - Compound errors (one wrong step invalidates everything after it)
 
-### 9.2 Evaluation Dimensions
+### 8.2 Evaluation Dimensions
 
 | Dimension | What It Measures | How to Evaluate |
 |-----------|-----------------|-----------------|
@@ -738,7 +700,7 @@ Agents operate in open-ended environments with:
 | **Robustness** | Does it handle edge cases and errors? | Adversarial inputs, tool failures |
 | **Cost** | Total LLM tokens + tool calls + time | Dollar cost per task |
 
-### 9.3 Key Benchmarks
+### 8.3 Key Benchmarks
 
 | Benchmark | Domain | Metric | Key Feature |
 |-----------|--------|--------|-------------|
@@ -750,7 +712,7 @@ Agents operate in open-ended environments with:
 | **HumanEval** | Code generation | pass@k | Function-level code synthesis |
 | **MATH / GSM8K** | Math reasoning | % correct | With tool use (calculator) |
 
-### 9.4 Evaluation Best Practices
+### 8.4 Evaluation Best Practices
 
 1. **Sandbox everything**: Agents execute code, call APIs, modify files. Always run in isolated environments.
 2. **Measure cost alongside accuracy**: An agent that solves 90% of tasks at $5/task may be worse than one solving 85% at $0.50/task.
@@ -760,75 +722,9 @@ Agents operate in open-ended environments with:
 
 ---
 
-## 10. Frameworks & Implementation
+## 9. Failure Modes & Limitations
 
-### 10.1 Framework Comparison
-
-| Framework | Philosophy | Best For | Key Feature |
-|-----------|-----------|----------|-------------|
-| **LangChain** | Composable chains and agents | General-purpose agent building | Largest ecosystem, most integrations |
-| **LlamaIndex** | Data-centric (connect LLMs to data) | RAG-heavy agent systems | Strong data connectors |
-| **AutoGen** (Microsoft) | Multi-agent conversation | Multi-agent systems | Agent-to-agent chat protocol |
-| **CrewAI** | Role-based multi-agent | Team-based task execution | Simple role/task assignment |
-| **LangGraph** | Graph-based agent workflows | Complex, stateful agent flows | Cycles, state management, persistence |
-| **Semantic Kernel** (Microsoft) | Enterprise AI orchestration | Enterprise integration | .NET/Python, strong Azure integration |
-| **Anthropic Agent SDK** | Minimal agent scaffolding | Building with Claude models | Lightweight, focused |
-
-### 10.2 LangGraph — The Modern Standard
-
-LangGraph (from the LangChain team) has emerged as the leading framework for complex agents because it models agents as **state machines** (graphs):
-
-```
-         ┌─────────┐
-         │  Start  │
-         └────┬────┘
-              │
-              ▼
-         ┌─────────┐
-    ┌────│  Route  │────┐
-    │    └─────────┘    │
-    ▼                   ▼
-┌────────┐        ┌─────────┐
-│Research│        │  Answer  │
-│  Node  │        │  Node   │
-└───┬────┘        └────┬────┘
-    │                  │
-    ▼                  │
-┌────────┐             │
-│Analyze │             │
-│  Node  │             │
-└───┬────┘             │
-    │                  │
-    └──────┬───────────┘
-           ▼
-      ┌─────────┐
-      │   End   │
-      └─────────┘
-```
-
-**Key advantages**:
-- **Cycles**: Supports loops (retry, reflect, iterate) — essential for agents
-- **State persistence**: Save and resume agent state across sessions
-- **Human-in-the-loop**: Pause execution for human approval at critical steps
-- **Streaming**: Stream intermediate results to the user
-- **Checkpointing**: Record every state for debugging and replay
-
-### 10.3 Architecture Decision: Framework vs Custom
-
-| Use Framework | Build Custom |
-|--------------|-------------|
-| Rapid prototyping | Highly specific requirements |
-| Standard agent patterns | Extreme performance needs |
-| Team needs shared abstractions | Minimal dependency footprint |
-| Rich ecosystem needed | Full control over every detail |
-
-**The practical advice**: Start with a framework (LangGraph) for prototyping. Extract to custom code only where the framework creates friction. Many production systems use frameworks for orchestration but custom code for critical paths.
-
----
-
-## 11. Failure Modes & Limitations
-
-### 11.1 The Compounding Error Problem
+### 9.1 The Compounding Error Problem
 
 Each step in an agent's execution has some probability of error. Over $n$ steps:
 
@@ -851,7 +747,7 @@ Success:  95%   90%   86%   81%   77%   74%   70%   66%   63%  60%
                                              After 10 steps, only 60% succeed
 ```
 
-### 11.2 Taxonomy of Agent Failures
+### 9.2 Taxonomy of Agent Failures
 
 | Failure Mode | Description | Example |
 |-------------|-------------|---------|
@@ -865,7 +761,7 @@ Success:  95%   90%   86%   81%   77%   74%   70%   66%   63%  60%
 | **Premature termination** | Stops before the task is complete | Returns a partial answer without checking completeness |
 | **Safety violation** | Takes harmful or unauthorized actions | Deletes files, sends unintended messages, exposes data |
 
-### 11.3 Mitigation Strategies
+### 9.3 Mitigation Strategies
 
 | Strategy | How It Helps |
 |----------|-------------|
@@ -879,7 +775,7 @@ Success:  95%   90%   86%   81%   77%   74%   70%   66%   63%  60%
 | **Observation validation** | Parse and validate tool results before feeding back to the LLM |
 | **Cost budgets** | Hard limits on total tokens / tool calls per task |
 
-### 11.4 The Reliability Frontier
+### 9.4 The Reliability Frontier
 
 Current state (2025-2026):
 
@@ -893,33 +789,20 @@ Current state (2025-2026):
 
 The gap between "impressive demos" and "reliable production systems" is the central challenge in agent research.
 
----
+### 9.5 Failure Modes — Cause and Fix
 
-## 12. The Future of Agents (2025-2026)
-
-### 12.1 Key Trends
-
-**1. Computer Use Agents**: Models that directly control computer interfaces (clicking, typing, navigating). Anthropic's "computer use" and OpenAI's "operator" allow agents to interact with any application through its GUI — no API required.
-
-**2. Test-Time Compute for Agents**: Models like o1/o3 that "think longer" before acting. More reasoning = better planning = fewer errors per step. This could dramatically shift the reliability frontier.
-
-**3. Agent-Specific Training**: Fine-tuning models specifically for agent tasks (tool use, planning, error recovery) rather than relying on general-purpose chat models.
-
-**4. Formal Verification**: Using formal methods to verify agent plans before execution. Especially important for high-stakes domains (finance, healthcare).
-
-**5. Agent-to-Agent Protocols**: Standardized protocols for agents to communicate, negotiate, and collaborate — analogous to how HTTP standardized web communication.
-
-### 12.2 Open Problems
-
-1. **Reliability at scale**: How to achieve >99% reliability for 10+ step tasks?
-2. **Safe autonomy**: How to give agents more autonomy without more risk?
-3. **Cost efficiency**: Current agents use 10-100x more tokens than non-agent approaches. How to reduce this?
-4. **Evaluation**: How to evaluate open-ended agent capabilities beyond narrow benchmarks?
-5. **Long-horizon planning**: Current agents plan well for 5-10 steps. How to plan reliably for 100+ steps?
+| Failure Mode | What Happens | Root Cause | Fix |
+|---|---|---|---|
+| Hallucinated tool call | Model calls tool with invented arguments | Not grounded in actual tool schema | Strict JSON schema validation, few-shot correct call examples |
+| Infinite loop | Agent repeats the same action | Observation doesn't trigger stopping condition | Max iteration limit, loop detection |
+| Context overflow | Performance degrades mid-task | KV cache fills with stale history | Summarize old steps, compress memory |
+| Goal drift | Agent pursues unintended sub-goals | Reward hacking, vague termination criteria | Explicit stop conditions, human-in-the-loop checkpoints |
+| Tool failure cascade | One error causes all subsequent steps to fail | No error handling | Tool retry logic, fallback actions |
+| Premature stopping | Agent stops before completing task | Uncertainty triggers early exit | Better stopping criteria, confidence thresholds |
 
 ---
 
-## 13. Interview Questions & Answers
+## 10. Interview Questions & Answers
 
 ### Q1: Design an AI agent that can answer questions about a company's codebase.
 

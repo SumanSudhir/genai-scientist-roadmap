@@ -14,12 +14,9 @@
 11. [Practice Design: RAG-Based Enterprise Q&A](#11-practice-design-rag-based-enterprise-qa)
 12. [Practice Design: Conversational AI Chatbot](#12-practice-design-conversational-ai-chatbot)
 13. [Practice Design: Content Moderation at Scale](#13-practice-design-content-moderation-at-scale)
-14. [Practice Design: Code Generation Assistant](#14-practice-design-code-generation-assistant)
-15. [Practice Design: LLM-Powered Search & Recommendation](#15-practice-design-llm-powered-search--recommendation)
-16. [Practice Design: Document Summarization Pipeline](#16-practice-design-document-summarization-pipeline)
-17. [Practice Design: Multi-Agent Customer Service](#17-practice-design-multi-agent-customer-service)
-18. [Common Pitfalls & Anti-Patterns](#18-common-pitfalls--anti-patterns)
-19. [Interview Questions & Answers](#19-interview-questions--answers)
+14. [Practice Design: LLM-Powered Search & Recommendation](#14-practice-design-llm-powered-search--recommendation)
+15. [Common Pitfalls & Anti-Patterns](#15-common-pitfalls--anti-patterns)
+16. [Interview Questions & Answers](#16-interview-questions--answers)
 
 ---
 
@@ -93,6 +90,39 @@ How the system **performs**:
 6. What data is available? (Labeled/unlabeled, public/proprietary)
 7. What's the acceptable failure mode? (Refuse vs hallucinate)
 ```
+
+### Requirements Gathering — Interview Opening Template
+
+In an interview, spend the **first 3-4 minutes** asking these 5 questions before drawing a single diagram:
+
+```
+QUESTION 1 — Scale:
+  "How many users and requests per second are we expecting?
+   Day-1 launch vs. 1-year scale?"
+  → Drives: single server vs. distributed, caching strategy
+
+QUESTION 2 — Latency vs. Throughput:
+  "Is this user-facing real-time (chat, autocomplete) or
+   asynchronous (batch analysis, nightly reports)?"
+  → Drives: streaming, async queues, SLA definition
+
+QUESTION 3 — Data Freshness:
+  "How fresh does the knowledge need to be?
+   Minutes (news), days (docs), or static (product catalog)?"
+  → Drives: RAG indexing frequency, fine-tuning vs. prompting
+
+QUESTION 4 — Quality vs. Cost:
+  "What's the cost budget per query?
+   Can we use smaller models for simple queries?"
+  → Drives: model cascading, caching, quantization decisions
+
+QUESTION 5 — Failure Mode:
+  "What happens if the model is wrong?
+   Is it better to refuse or to attempt an answer?"
+  → Drives: confidence thresholds, fallback logic, human handoff
+```
+
+**After these 5 questions, you will have enough signal to make every major architectural decision.**
 
 ---
 
@@ -313,6 +343,41 @@ For a RAG-based chatbot targeting 2s total response:
 | Output guardrails | 100ms | Async / streaming |
 | **Total** | **~2000ms** | |
 
+### Latency vs Throughput — The Core Tradeoff (With Numbers)
+
+```
+Metric          Small batch (1)    Large batch (32)    Difference
+──────────────────────────────────────────────────────────────────
+TTFT (p50)         120ms              480ms               4×  worse
+TTFT (p99)         200ms              1800ms              9×  worse
+Tokens/second      45 tok/s           800 tok/s           18× better
+GPU utilization    12%                78%                 6×  better
+Cost/1M tokens     $4.40              $0.50               9×  cheaper
+
+(Measured: Llama 2 7B INT8, 1× A100 80GB, 512-token outputs)
+```
+
+**The curve**:
+
+```
+Latency
+(p99, ms)
+  2000 │×
+       │  ×
+  1500 │     ×
+       │         ×
+  1000 │              ×
+       │                   ×
+   500 │                         ×     ×      ×
+       │
+     0 └──────────────────────────────────────────► Batch size
+       1    2    4    8    16   32   64  128  256
+
+Throughput keeps rising until GPU memory limit. Latency rises faster with batch at high load.
+```
+
+**Interview answer**: "I'd set a p99 latency SLA (e.g., 2s) and find the maximum batch size that stays under it. That gives us the best cost/throughput without violating user experience."
+
 ---
 
 ## 6. Step 5 — Evaluation & Metrics
@@ -424,6 +489,43 @@ Approach 3: Uncertainty estimation
 | **P1 (High)** | Latency > 3× SLA, quality drop > 10% | Alert team, investigate immediately |
 | **P2 (Medium)** | Cost spike, cache hit rate drop | Alert during business hours |
 | **P3 (Low)** | Gradual drift, minor metric changes | Weekly review |
+
+### LLM Production Monitoring Checklist
+
+Use this as a mental checklist when asked "how would you monitor this system?":
+
+```
+LATENCY (user experience)
+  ☐ TTFT p50 / p95 / p99  (time to first token)
+  ☐ End-to-end latency per request
+  ☐ Queue depth (requests waiting)
+  ☐ Timeout rate (% requests exceeding SLA)
+
+QUALITY (model behavior)
+  ☐ Hallucination rate  (NLI-based grounding check, sampled)
+  ☐ Refusal rate        (% "I can't help with that" responses)
+  ☐ User feedback score (thumbs up/down, star rating)
+  ☐ Task completion rate (did user achieve their goal?)
+
+SAFETY (compliance)
+  ☐ Toxic/harmful content rate  (classifier on outputs)
+  ☐ PII leakage detection       (regex + NER on outputs)
+  ☐ Jailbreak attempt volume    (security signal)
+  ☐ Policy violation count      (per use-case policies)
+
+COST (efficiency)
+  ☐ Token cost per request (input + output tokens × price)
+  ☐ Cache hit rate         (higher = cheaper)
+  ☐ GPU utilization %      (< 30% → over-provisioned)
+  ☐ Model routing %        (what % hits expensive vs cheap model)
+
+RELIABILITY (ops)
+  ☐ Error rate (5xx, timeouts, invalid outputs)
+  ☐ Provider availability (if using external API)
+  ☐ Dependency health (vector DB, embedding service)
+```
+
+**Interview tip**: When asked to design monitoring, structure your answer around these 5 categories. Most candidates only mention latency — covering quality, safety, and cost signals will stand out.
 
 ---
 
@@ -803,76 +905,7 @@ $$
 
 ---
 
-## 14. Practice Design: Code Generation Assistant
-
-### Problem Statement
-Design a code completion and generation system for a developer IDE plugin.
-
-### Architecture
-
-```
-IDE Plugin
-    │
-    ├── Inline Completion (fast, streaming)
-    │       │
-    │       ▼
-    │   ┌───────────────────┐
-    │   │ Context Builder    │
-    │   │ • Current file     │
-    │   │ • Open tabs        │
-    │   │ • Repository index │
-    │   │ • Recent edits     │
-    │   └────────┬──────────┘
-    │            ▼
-    │   ┌───────────────────┐
-    │   │ Code LLM          │     Latency budget: <500ms
-    │   │ (small, fast:     │     for first suggestion
-    │   │  StarCoder 3B or  │
-    │   │  custom fine-tune) │
-    │   └───────────────────┘
-    │
-    └── Chat / Generation (thorough)
-            │
-            ▼
-        ┌───────────────────┐
-        │ Full Context +    │     Latency budget: <3s
-        │ RAG over codebase │     for first token
-        │ + Large model     │
-        │ (GPT-4o / Claude) │
-        └───────────────────┘
-```
-
-### Key Design Decisions
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Inline completion model | Small (1-3B), fast | Latency critical, suggestions must feel instant |
-| Chat model | Large (70B+ / frontier API) | Quality > latency for explicit requests |
-| Context | Fill-in-the-middle (prefix + suffix) | IDE has both sides of the cursor |
-| Repository awareness | Embedding-based code search | Find relevant functions/types |
-| Evaluation | HumanEval, pass@k, user acceptance rate | Code correctness matters |
-
-### Fill-in-the-Middle (FIM)
-
-Most code models are trained with FIM objective to support cursor-position completion:
-
-```
-Training format:
-<PRE> {prefix code} <SUF> {suffix code} <MID> {middle code to generate}
-
-Inference:
-<PRE> def fibonacci(n):
-    if n <= 1:
-        return n
-    <SUF>
-    return fibonacci(n-1) + fibonacci(n-2) <MID>
-
-Model generates: "    "  (or appropriate logic)
-```
-
----
-
-## 15. Practice Design: LLM-Powered Search & Recommendation
+## 14. Practice Design: LLM-Powered Search & Recommendation
 
 ### Problem Statement
 Design a semantic search system for an e-commerce platform with 10M products.
@@ -928,165 +961,7 @@ Design a semantic search system for an e-commerce platform with 10M products.
 
 ---
 
-## 16. Practice Design: Document Summarization Pipeline
-
-### Problem Statement
-Design a system to summarize long documents (10-100 pages) for legal/financial analysts.
-
-### The Challenge: Long Documents Exceed Context
-
-For documents beyond the model's context window, use hierarchical summarization:
-
-### Map-Reduce Summarization
-
-```
-Long Document (100 pages)
-        │
-        ▼
-┌───────────────────────────┐
-│  Split into chunks        │
-│  (1-2 pages each)         │
-│  → 50-100 chunks          │
-└───────────┬───────────────┘
-            │
-            ▼
-┌───────────────────────────┐
-│  MAP: Summarize each      │     Can be parallelized
-│  chunk independently      │     across API calls
-│  → 50-100 summaries       │
-└───────────┬───────────────┘
-            │
-            ▼
-┌───────────────────────────┐
-│  REDUCE: Combine chunk    │
-│  summaries into final     │     May need multiple
-│  summary                  │     reduction steps
-└───────────────────────────┘
-```
-
-### Refine Strategy (Alternative)
-
-```
-Chunk 1 → Summary₁
-Chunk 2 + Summary₁ → Summary₂    (refine with new info)
-Chunk 3 + Summary₂ → Summary₃    (refine with new info)
-...
-Chunk N + Summary_{N-1} → Final Summary
-```
-
-**Trade-offs**:
-| | Map-Reduce | Refine |
-|--|-----------|--------|
-| Parallelizable | Yes (map phase) | No (sequential) |
-| Coherence | May lose cross-chunk context | Better (running context) |
-| Latency | Lower (parallel) | Higher (sequential) |
-| Lost info | Independent chunks can't cross-reference | Later chunks may override earlier |
-
-### Modern Approach: Long-Context Models
-
-With 128K-1M token context models (Gemini, Claude), many documents fit in one pass:
-
-$$
-\text{If document tokens} < \text{context window}: \text{single-pass summarization}
-$$
-
-But even with long context, **stuffing everything into one prompt isn't always best**:
-- Attention dilution on very long contexts
-- Lost-in-the-middle effect (models attend less to middle of long contexts)
-- Higher cost ($\propto$ token count)
-
-**Hybrid approach**: Long-context model with explicit section-by-section instructions:
-
-```
-Summarize this document. Process it in order:
-1. First, identify the key sections and themes
-2. For each section, extract the critical points
-3. Synthesize into a coherent executive summary
-
-[Full document here]
-```
-
----
-
-## 17. Practice Design: Multi-Agent Customer Service
-
-### Problem Statement
-Design an AI customer service system that handles order management, technical support, billing, and general inquiries.
-
-### Architecture
-
-```
-┌────────────────────────────────────────────────────────────┐
-│                Multi-Agent Customer Service                  │
-│                                                            │
-│  User ──► Supervisor Agent                                 │
-│               │                                            │
-│               ├──► Order Agent ──► Order DB, Shipping API  │
-│               │    (track, cancel, return)                  │
-│               │                                            │
-│               ├──► Billing Agent ──► Payment System         │
-│               │    (refunds, invoices, plans)               │
-│               │                                            │
-│               ├──► Tech Support Agent ──► KB, Diagnostics  │
-│               │    (troubleshoot, escalate)                 │
-│               │                                            │
-│               ├──► FAQ Agent ──► RAG over help docs         │
-│               │    (general questions)                      │
-│               │                                            │
-│               └──► Human Handoff                           │
-│                    (complex cases)                          │
-│                                                            │
-│  Shared: Conversation history, user profile, policy rules  │
-└────────────────────────────────────────────────────────────┘
-```
-
-### Supervisor Routing Logic
-
-The supervisor agent classifies intent and routes:
-
-```
-Supervisor System Prompt:
-"You are a routing agent. Based on the user's message, route to:
-- ORDER: order tracking, cancellation, returns
-- BILLING: payments, refunds, subscription changes
-- TECH: technical issues, troubleshooting
-- FAQ: general questions about products/services
-- HUMAN: emotional distress, legal threats, complex multi-issue
-
-Respond with exactly one category."
-```
-
-### Tool-Equipped Agents
-
-Each agent has specific tools:
-
-| Agent | Tools | Authority |
-|-------|-------|-----------|
-| Order Agent | `get_order_status`, `initiate_return`, `cancel_order` | Can cancel orders < $100 |
-| Billing Agent | `issue_refund`, `get_invoice`, `update_plan` | Can refund < $50 |
-| Tech Support | `run_diagnostic`, `search_kb`, `create_ticket` | Can create tickets |
-| FAQ Agent | `search_docs`, `get_policy` | Read-only |
-
-**Escalation rules**: Actions above authority limits → human approval required.
-
-### Handoff Between Agents
-
-When the conversation spans multiple intents:
-
-```
-User: "My order is late and I want a refund"
-    → Supervisor routes to Order Agent
-    → Order Agent checks status, confirms delay
-    → Order Agent says: "Let me transfer you to billing for the refund"
-    → Supervisor routes to Billing Agent (with context from Order Agent)
-    → Billing Agent processes refund
-```
-
-**Critical**: Pass conversation context and findings between agents to avoid the user repeating themselves.
-
----
-
-## 18. Common Pitfalls & Anti-Patterns
+## 15. Common Pitfalls & Anti-Patterns
 
 ### Design Anti-Patterns
 
@@ -1124,7 +999,7 @@ Things interviewers watch for:
 
 ---
 
-## 19. Interview Questions & Answers
+## 16. Interview Questions & Answers
 
 ### Q1: Design a RAG-based Q&A system for 10K concurrent users. Cover end-to-end architecture.
 

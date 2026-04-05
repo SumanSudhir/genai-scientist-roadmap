@@ -20,10 +20,9 @@
 7. [Regularization](#7-regularization)
 8. [Unsupervised Learning: Clustering](#8-unsupervised-learning-clustering)
 9. [Dimensionality Reduction](#9-dimensionality-reduction)
-10. [Feature Engineering & Selection](#10-feature-engineering--selection)
-11. [Evaluation Metrics](#11-evaluation-metrics)
-12. [Overfitting: Detection & Prevention](#12-overfitting-detection--prevention)
-13. [Interview Questions & Answers](#13-interview-questions--answers)
+10. [Evaluation Metrics](#10-evaluation-metrics)
+11. [Overfitting: Detection & Prevention](#11-overfitting-detection--prevention)
+12. [Interview Questions & Answers](#12-interview-questions--answers)
 
 ---
 
@@ -327,6 +326,31 @@ In practice, they produce very similar trees. Gini is slightly faster to compute
 - Maximum number of leaf nodes
 - Pruning: grow full tree, then remove branches that don't improve validation performance
 
+### 4.5 Decision Tree Split — Worked Example
+
+10 patients, predicting disease (Y=1) or no disease (Y=0).
+
+Feature: "Age > 40?" splits data:
+  Age ≤ 40:  3 patients → [Y=0: 3, Y=1: 0]   pure leaf, no disease
+  Age > 40:  7 patients → [Y=0: 1, Y=1: 6]   mostly disease
+
+**Entropy before split** (5Y=0, 5Y=1 in parent):
+  H(parent) = -0.5×log₂(0.5) - 0.5×log₂(0.5) = 1.0 bit (maximum uncertainty)
+
+**Entropy after split**:
+  H(Age≤40) = -1×log₂(1) = 0 bits (pure)
+  H(Age>40) = -(1/7)×log₂(1/7) - (6/7)×log₂(6/7) ≈ 0.592 bits
+
+**Weighted entropy** = (3/10)×0 + (7/10)×0.592 = 0.414 bits
+
+**Information Gain** = H(parent) - H(after) = 1.0 - 0.414 = **0.586 bits**
+
+A higher IG means this split is more informative. The tree chooses the feature with highest IG at each node.
+
+Gini impurity is an alternative to entropy: G = 1 - Σpᵢ²
+For the parent (0.5/0.5 split): G = 1 - (0.5² + 0.5²) = 0.5 (max impurity)
+For Age≤40 leaf: G = 1 - (1² + 0²) = 0 (pure)
+
 ---
 
 ## 5. Ensemble Methods
@@ -448,6 +472,30 @@ Typical winner      Noisy data, outliers       Clean data, complex patterns
 
 **Recent research**: Even for tabular data, well-tuned deep networks can match tree ensembles, but trees still win on ease of tuning. For most Kaggle-style tabular competitions, XGBoost/LightGBM remain dominant.
 
+### 5.8 Gradient Boosting — Step-by-Step
+
+Dataset: predict house price from size.
+Initial prediction: mean(Y) = $200K for all houses.
+
+**Iteration 1**:
+  Residuals (actual - predicted):
+    House A: $300K - $200K = +$100K  (underpredicted)
+    House B: $150K - $200K = -$50K   (overpredicted)
+    House C: $250K - $200K = +$50K   (underpredicted)
+  
+  Fit a weak learner (depth-1 tree) to the RESIDUALS:
+    If size > 2000sqft: predict +$75K
+    If size ≤ 2000sqft: predict -$25K
+  
+  Update predictions (learning rate η=0.1):
+    House A (>2000sqft): $200K + 0.1×$75K = $207.5K
+    House B (≤2000sqft): $200K + 0.1×(-$25K) = $197.5K
+    House C (>2000sqft): $200K + 0.1×$75K = $207.5K
+
+**Key insight**: Each tree corrects the errors of all previous trees. With 100 iterations, the model accumulates 100 small corrections. The small learning rate (0.1) prevents overfitting to any single tree's noise.
+
+**XGBoost/LightGBM add**: Second-order gradients (Hessian) for smarter leaf value computation, regularization terms, and tree structure optimization.
+
 ---
 
 ## 6. Bias-Variance Tradeoff
@@ -541,6 +589,39 @@ Error
 
 Beyond the interpolation threshold (where the model can perfectly fit training data), increasing parameters FURTHER can actually improve generalization. This is why LLMs with 70B+ parameters trained on finite data don't catastrophically overfit -- they're in the "over-parameterized" regime where implicit regularization from SGD, architecture, and training procedures keeps generalization good.
 
+### 6.7 Bias-Variance Visual
+
+```
+          High Bias        Low Bias
+          (Underfitting)   (Good fit)
+
+High      ┌──────────────┬──────────────┐
+Variance  │  WORST:      │  OVERFIT:    │
+          │  Simple model│  Wiggly model│
+          │  wrong +     │  memorizes   │
+          │  inconsistent│  training    │
+          ├──────────────┼──────────────┤
+Low       │  UNDERFIT:   │  BEST:       │
+Variance  │  Simple model│  Complex     │
+          │  consistently│  model, good │
+          │  wrong       │  generalize  │
+          └──────────────┴──────────────┘
+```
+
+Practical examples:
+  High Bias:    Linear regression for non-linear data
+  High Variance: Depth-10 decision tree on 100 samples (memorizes training)
+  Good balance: Random forest, gradient boosting, regularized deep networks
+
+The bias-variance tradeoff:
+  Total Error = Bias² + Variance + Irreducible Noise
+  
+  Increasing model complexity:
+    Bias ↓ (fits training data better)
+    Variance ↑ (more sensitive to training data specifics)
+  
+  Sweet spot: where Bias² + Variance is minimized on validation data
+
 ---
 
 ## 7. Regularization
@@ -609,25 +690,17 @@ Benefits of both: sparsity from L1 + stability from L2. Useful when features are
 
 ### 8.1 K-Means
 
-**Algorithm**:
-1. Initialize $K$ cluster centers (randomly or via K-Means++)
-2. **Assign**: Each point to its nearest center
-3. **Update**: Move each center to the mean of its assigned points
-4. Repeat 2-3 until convergence (assignments don't change)
+**What it does**: Partitions data into $K$ clusters by iteratively assigning each point to its nearest centroid and recomputing centroids until convergence.
 
-**Objective**: Minimize within-cluster sum of squared distances:
+**Algorithm**: (1) Initialize $K$ centers (randomly or K-Means++). (2) Assign each point to nearest center. (3) Move each center to the mean of its cluster. (4) Repeat until stable.
 
-$$J = \sum_{k=1}^{K} \sum_{\mathbf{x} \in C_k} \|\mathbf{x} - \boldsymbol{\mu}_k\|^2$$
+**When to use**: Known number of clusters, roughly spherical clusters, fast approximate grouping.
 
-**Properties**:
-- Converges, but to a local optimum (depends on initialization)
-- $K$ must be specified in advance
-- Assumes spherical, equal-size clusters
-- Sensitive to outliers
+**Key limitations**: $K$ must be chosen upfront; assumes equal-size spherical clusters; sensitive to outliers; converges to local optima (run multiple times).
 
-**K-Means++ initialization**: Choose initial centers that are far apart. First center is random. Each subsequent center is chosen with probability proportional to its distance from existing centers. Dramatically improves results.
+**K-Means++ initialization**: Choose initial centers far apart — dramatically improves results over random init.
 
-**Choosing K**: Elbow method (plot $J$ vs $K$, look for the "elbow"), silhouette score, domain knowledge.
+**Choosing K**: Elbow method (plot within-cluster variance vs K, pick the "elbow"), silhouette score.
 
 ### 8.2 DBSCAN (Density-Based Spatial Clustering)
 
@@ -722,62 +795,9 @@ $$L = \text{KL}(P \| Q) = \sum_{ij} p_{ij} \log \frac{p_{ij}}{q_{ij}}$$
 
 ---
 
-## 10. Feature Engineering & Selection
+## 10. Evaluation Metrics
 
-### 10.1 Feature Engineering
-
-The art of creating informative input features from raw data. Before deep learning, this was where most ML effort went.
-
-**Numerical features**:
-- Scaling: StandardScaler (z-score), MinMaxScaler (0-1), RobustScaler (uses median/IQR, robust to outliers)
-- Log/sqrt transforms for skewed distributions
-- Binning: Convert continuous to categorical (age -> age groups)
-- Polynomial features: $x_1, x_2 \rightarrow x_1, x_2, x_1^2, x_2^2, x_1 x_2$
-
-**Categorical features**:
-- One-hot encoding: each category -> binary column. Explodes dimensionality for high-cardinality features.
-- Label encoding: map categories to integers. Implies ordering -- only use for ordinal features.
-- Target encoding: replace category with mean of target for that category. Powerful but risks leakage (use with cross-validation).
-- Embedding: learn dense representation (this IS what the token embedding layer in transformers does).
-
-**Text features** (pre-deep-learning):
-- Bag of Words: count of each word
-- TF-IDF: term frequency * inverse document frequency (Topic 6 goes deep)
-- N-grams: word pairs/triples as features
-
-**Time features**: Hour, day-of-week, month, is_weekend, days_since_event.
-
-### 10.2 Feature Selection
-
-Remove irrelevant or redundant features to reduce overfitting and improve interpretability.
-
-**Filter methods** (independent of model):
-- Correlation with target
-- Mutual information
-- Chi-squared test
-- Variance threshold
-
-**Wrapper methods** (use model performance):
-- Forward selection: start empty, add features one by one
-- Backward elimination: start full, remove features one by one
-- Recursive Feature Elimination (RFE)
-
-**Embedded methods** (built into model):
-- L1 regularization (sets irrelevant feature weights to zero)
-- Tree feature importance (Random Forest, XGBoost)
-- Attention weights (in transformers -- though interpretation is debated)
-
-### 10.3 Feature Engineering vs Deep Learning
-
-Deep learning's core advantage is automatic feature learning. CNNs learn visual features, transformers learn contextual text features. This eliminated the need for manual feature engineering in domains with spatial/sequential structure.
-
-But for tabular data, feature engineering still matters. The best Kaggle solutions for tabular tasks combine domain-specific features with XGBoost/LightGBM.
-
----
-
-## 11. Evaluation Metrics
-
-### 11.1 Classification Metrics
+### 10.1 Classification Metrics
 
 **Confusion Matrix**:
 ```
@@ -803,7 +823,7 @@ Balances precision and recall. Harmonic mean (not arithmetic) because it penaliz
 - **High precision**: Spam filtering (don't delete real emails), content moderation (don't censor legitimate speech)
 - **High recall**: Medical diagnosis (don't miss cancer), fraud detection (catch all fraud), safety filtering for LLMs (catch all harmful outputs)
 
-### 11.2 Precision-Recall Trade-off
+### 10.2 Precision-Recall Trade-off
 
 Most classifiers output a probability. The classification threshold determines the trade-off:
 - **Low threshold** (e.g., 0.1): Predict positive more often -> high recall, low precision
@@ -813,7 +833,7 @@ Most classifiers output a probability. The classification threshold determines t
 
 **Average Precision (AP)**: Area under the PR curve. Summary metric for ranking quality.
 
-### 11.3 ROC-AUC
+### 10.3 ROC-AUC
 
 **ROC Curve**: Plot True Positive Rate (recall) vs False Positive Rate ($\frac{FP}{FP + TN}$) at various thresholds.
 
@@ -826,7 +846,7 @@ Most classifiers output a probability. The classification threshold determines t
 
 **ROC-AUC vs PR-AUC**: With imbalanced data, ROC-AUC can be misleadingly optimistic (the large number of true negatives inflates TNR). PR-AUC is more informative for imbalanced problems because it focuses on the positive class.
 
-### 11.4 Regression Metrics
+### 10.4 Regression Metrics
 
 **MSE** (Mean Squared Error): $\frac{1}{n} \sum (y - \hat{y})^2$. Penalizes large errors heavily (quadratic).
 
@@ -836,7 +856,7 @@ Most classifiers output a probability. The classification threshold determines t
 
 **R-squared**: $R^2 = 1 - \frac{SS_{\text{res}}}{SS_{\text{total}}} = 1 - \frac{\sum(y - \hat{y})^2}{\sum(y - \bar{y})^2}$. Fraction of variance explained. $R^2 = 1$ is perfect, $R^2 = 0$ is as bad as predicting the mean.
 
-### 11.5 Cross-Validation
+### 10.5 Cross-Validation
 
 Instead of a single train/test split, evaluate on multiple splits to get a more reliable estimate.
 
@@ -853,9 +873,9 @@ Instead of a single train/test split, evaluate on multiple splits to get a more 
 
 ---
 
-## 12. Overfitting: Detection & Prevention
+## 11. Overfitting: Detection & Prevention
 
-### 12.1 What Is Overfitting?
+### 11.1 What Is Overfitting?
 
 The model learns the training data too well, including its noise and idiosyncrasies, and fails to generalize to new data.
 
@@ -874,7 +894,7 @@ Loss
     Start of overfitting
 ```
 
-### 12.2 Causes
+### 11.2 Causes
 
 1. **Model too complex** for the amount of data (too many parameters, too deep)
 2. **Not enough training data** for the model's capacity
@@ -882,7 +902,7 @@ Loss
 4. **Training too long** without early stopping
 5. **No regularization** applied
 
-### 12.3 Prevention Techniques
+### 11.3 Prevention Techniques
 
 **More data**: The most reliable cure. If you double your data, you can usually use a more complex model without overfitting. Data augmentation is a cheaper alternative.
 
@@ -902,7 +922,7 @@ Loss
 
 ---
 
-## 13. Interview Questions & Answers
+## 12. Interview Questions & Answers
 
 ### Q1: Derive the gradient update for logistic regression.
 

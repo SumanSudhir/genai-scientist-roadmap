@@ -10,16 +10,12 @@
 2. [Tokenization Strategies — The Spectrum](#2-tokenization-strategies)
 3. [Byte-Pair Encoding (BPE)](#3-bpe)
 4. [WordPiece](#4-wordpiece)
-5. [Unigram Language Model](#5-unigram)
-6. [SentencePiece](#6-sentencepiece)
-7. [Byte-Level BPE](#7-byte-level-bpe)
-8. [Special Tokens](#8-special-tokens)
-9. [Vocabulary Size Trade-offs](#9-vocabulary-size)
-10. [Tokenizer Fertility & Efficiency](#10-fertility)
-11. [Multilingual Tokenization](#11-multilingual)
-12. [Tokenization & Model Performance](#12-tokenization-and-performance)
-13. [Comparing Tokenizers Across Models](#13-comparing-tokenizers)
-14. [Interview Questions & Answers](#14-interview-qa)
+5. [Byte-Level BPE](#5-byte-level-bpe)
+6. [Special Tokens](#6-special-tokens)
+7. [Vocabulary Size Trade-offs](#7-vocabulary-size)
+8. [Tokenization & Model Performance](#8-tokenization-and-performance)
+9. [Comparing Tokenizers Across Models](#9-comparing-tokenizers)
+10. [Interview Questions & Answers](#10-interview-qa)
 
 ---
 
@@ -208,6 +204,33 @@ The model has never seen "lowest" during tokenizer training, but it composes it 
 - Training: $O(N \cdot V)$ where $N$ = corpus size and $V$ = vocabulary size (each merge requires a pass over the corpus)
 - Encoding: $O(n^2)$ for a word of length $n$ in the worst case (with efficient implementations: $O(n \log n)$)
 
+### 3.6 BPE Step-by-Step Walkthrough
+
+Starting corpus: ["low", "lower", "newest", "wider"]
+(With end-of-word marker: ["l o w </w>", "l o w e r </w>", "n e w e s t </w>", "w i d e r </w>"])
+
+Initial vocabulary: all individual characters {l, o, w, </w>, e, r, n, s, t, i, d}
+
+**Iteration 1**: Count all adjacent pairs:
+  "l o" appears 2x  (in "low", "lower")
+  "o w" appears 2x
+  "w </w>" appears 1x
+  "e r" appears 2x  (in "lower", "wider")
+  ... (many others)
+  
+  Most frequent: "e r" (2x) → MERGE into new token "er"
+  Vocabulary now includes "er"
+
+**Iteration 2**: After merging "er":
+  Corpus: ["l o w </w>", "l o w er </w>", "n e w e s t </w>", "w i d er </w>"]
+  Count pairs again... "l o" still 2x → MERGE into "lo"
+
+**After ~10 iterations**:
+  Common tokens: "lo", "low", "er", "est", "new", "wide", "newer", "lowest"
+  
+  "newest" → ["new", "est"] (2 tokens — recognized pattern)
+  "unknown_word" → [character-level fallback] — never OOV!
+
 ---
 
 ## 4. WordPiece
@@ -248,117 +271,19 @@ This distinguishes word-initial tokens from mid-word tokens, allowing the model 
 
 BPE does not use this convention — it relies on whitespace encoding (e.g., `Ġ` prefix for space-preceded tokens in GPT-2).
 
----
-
-## 5. Unigram Language Model
-
-Used by T5, ALBERT, XLNet, and mBART. Takes the opposite approach from BPE.
-
-### 5.1 Top-Down vs Bottom-Up
-
-| Approach | BPE | Unigram |
-|----------|-----|---------|
-| Direction | Bottom-up: start with characters, merge up | Top-down: start with large vocab, prune down |
-| Core idea | Greedily add tokens | Probabilistically remove tokens |
-| Optimization | Frequency heuristic | Maximum likelihood via EM |
-
-### 5.2 Algorithm
-
-**Training**:
-
-1. Start with a large initial vocabulary (e.g., all substrings up to a certain length, or BPE vocabulary + all characters)
-2. Define a unigram language model where each token $x_i$ has probability $p(x_i)$
-3. For a word $W$, the tokenization probability is:
-
-$$P(x_1, x_2, \ldots, x_n) = \prod_{i=1}^{n} p(x_i)$$
-
-4. Optimize token probabilities via EM to maximize the likelihood of the corpus
-5. Compute the loss increase $\Delta \mathcal{L}_i$ if token $i$ were removed from the vocabulary
-6. Remove the tokens with the smallest $\Delta \mathcal{L}_i$ (keeping a fraction, e.g., 80%)
-7. Repeat steps 4-6 until vocabulary reaches desired size
-
-### 5.3 Tokenization at Inference — The Viterbi Algorithm
-
-Unlike BPE (which is deterministic), Unigram can produce **multiple valid tokenizations** for the same word. It finds the most probable one using the Viterbi algorithm:
-
-$$x^* = \arg\max_{x_1, \ldots, x_n} \prod_{i=1}^{n} p(x_i) = \arg\max_{x_1, \ldots, x_n} \sum_{i=1}^{n} \log p(x_i)$$
-
-This is a shortest-path problem on a lattice of all possible segmentations, solvable in $O(n \cdot m)$ where $n$ = word length and $m$ = max token length.
-
-```
-Example: tokenizing "unrelated"
-
-Possible segmentations (lattice):
-  u-n-r-e-l-a-t-e-d       (all characters)
-  un-related               (2 tokens)
-  un-re-lat-ed             (4 tokens)
-  unre-lated               (2 tokens)
-  un-relat-ed              (3 tokens)
-
-Viterbi selects the segmentation with highest probability:
-  ["un", "related"]  if both are in vocab and high probability
-```
-
-### 5.4 Subword Regularization
-
-A unique advantage of Unigram: since multiple tokenizations exist, you can **sample** different tokenizations during training for data augmentation:
-
-$$x \sim P(x | W) = \frac{\prod_i p(x_i)}{Z(W)}$$
-
-where $Z(W) = \sum_{\text{all segmentations}} \prod_i p(x_i)$ is the partition function.
-
-This acts as a regularizer — the model sees different breakdowns of the same word across training steps, making it more robust to tokenization artifacts. Kudo (2018) showed this improves translation quality by 1-2 BLEU points.
+> **SentencePiece note**: SentencePiece is a language-independent tokenizer framework that applies BPE or Unigram at the byte/character level without needing pre-tokenization. Used by: T5, Llama, Mistral, many multilingual models.
 
 ---
 
-## 6. SentencePiece
-
-SentencePiece (Kudo & Richardson, 2018) is not a tokenization algorithm but a **framework** that wraps BPE or Unigram, making them language-agnostic.
-
-### 6.1 Key Design Choice: Treat Text as Raw Bytes
-
-Traditional tokenizers require language-specific pre-tokenization:
-- English: split on spaces and punctuation
-- Chinese: character-level splitting (no spaces)
-- Japanese: requires a morphological analyzer (MeCab)
-- German: compound words need special handling
-
-SentencePiece bypasses all of this by treating the input as a **raw byte sequence** (or Unicode code points). Spaces are treated as regular characters (replaced with `▁` = U+2581):
-
-$$\text{"Hello World"} \rightarrow \text{"▁Hello▁World"}$$
-
-The `▁` character marks positions where a space appeared, allowing lossless reconstruction:
-
-$$\text{detokenize(["▁Hello", "▁World"])} = \text{"Hello World"}$$
-
-### 6.2 Why This Matters
-
-| Property | Traditional (GPT-2 style) | SentencePiece |
-|----------|--------------------------|---------------|
-| Pre-tokenization | Language-specific rules | None needed |
-| Space handling | Separate step | Encoded as `▁` |
-| Multilingual | Requires per-language rules | Works out of the box |
-| Reversibility | Lossy (spaces ambiguous) | Lossless |
-| Used by | GPT-2, GPT-3, RoBERTa | T5, Llama, Mistral, mBART |
-
-### 6.3 SentencePiece + Unigram vs SentencePiece + BPE
-
-SentencePiece supports both algorithms. The choice is made at training time:
-
-- **T5, ALBERT**: SentencePiece + Unigram (subword regularization benefits)
-- **Llama, Mistral**: SentencePiece + BPE (simpler, well-understood)
-
----
-
-## 7. Byte-Level BPE
+## 5. Byte-Level BPE
 
 GPT-2 introduced byte-level BPE, which operates on **raw bytes** rather than Unicode characters. This is distinct from SentencePiece's approach.
 
-### 7.1 The Problem with Character-Level BPE
+### 5.1 The Problem with Character-Level BPE
 
 Standard BPE operates on Unicode characters. Unicode has ~150,000 characters across all scripts. The base vocabulary (before any merges) would need to include all of these.
 
-### 7.2 The Byte-Level Solution
+### 5.2 The Byte-Level Solution
 
 Instead of starting with Unicode characters, start with the **256 possible byte values** (0x00 to 0xFF):
 
@@ -375,18 +300,18 @@ BPE can merge byte pairs:
   [102, 195, 169] → "fé" (merged across byte boundary)
 ```
 
-### 7.3 Advantages
+### 5.3 Advantages
 
 1. **Zero OOV**: Any byte sequence can be tokenized — no `<unk>` tokens ever
 2. **Tiny base vocabulary**: 256 bytes vs ~150K Unicode characters
 3. **Language-agnostic**: Works for any language, emoji, code, binary formats
 4. **No pre-tokenization rules needed**: No language-specific splitting
 
-### 7.4 The GPT-2 Encoding Trick
+### 5.4 The GPT-2 Encoding Trick
 
 GPT-2 maps the 256 bytes to printable Unicode characters to avoid control characters in the vocabulary. This is a cosmetic mapping — the algorithm is still operating on bytes.
 
-### 7.5 Disadvantage: Fertility for Non-Latin Scripts
+### 5.5 Disadvantage: Fertility for Non-Latin Scripts
 
 Byte-level BPE with a small vocabulary produces many tokens per character for non-Latin scripts:
 
@@ -401,11 +326,11 @@ This means the same content in Chinese requires ~3× more tokens than English, m
 
 ---
 
-## 8. Special Tokens
+## 6. Special Tokens
 
 Special tokens are reserved tokens with specific roles that the model learns during pretraining.
 
-### 8.1 Common Special Tokens
+### 6.1 Common Special Tokens
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -428,7 +353,7 @@ Special tokens are reserved tokens with specific roles that the model learns dur
 └──────────┴─────────────────────────────────────────────────┘
 ```
 
-### 8.2 Structural Role
+### 6.2 Structural Role
 
 Special tokens serve as **control signals** that the model learns to interpret during pretraining:
 
@@ -447,7 +372,7 @@ GPT chat input:
   <|im_start|>assistant
 ```
 
-### 8.3 Adding Special Tokens
+### 6.3 Adding Special Tokens
 
 When adding new special tokens to a pretrained model:
 
@@ -460,11 +385,11 @@ The new embeddings start random and need gradient signal to become useful — a 
 
 ---
 
-## 9. Vocabulary Size Trade-offs
+## 7. Vocabulary Size Trade-offs
 
 The vocabulary size $|V|$ creates a three-way trade-off:
 
-### 9.1 The Trade-off Triangle
+### 7.1 The Trade-off Triangle
 
 $$\text{Vocab size } |V| \quad \leftrightarrow \quad \text{Sequence length} \quad \leftrightarrow \quad \text{Embedding parameters}$$
 
@@ -480,7 +405,7 @@ $$\text{Vocab size } |V| \quad \leftrightarrow \quad \text{Sequence length} \qua
 - Better per-token training signal (each token seen more often)
 - Poor coverage of non-English, domain-specific terms
 
-### 9.2 Embedding Layer Cost
+### 7.2 Embedding Layer Cost
 
 The embedding matrix accounts for a significant fraction of total parameters in smaller models:
 
@@ -495,7 +420,7 @@ $$\text{Embedding params} = |V| \times d_{\text{model}}$$
 
 For large models, the embedding cost is a small fraction. For small models, vocabulary size meaningfully affects the parameter budget.
 
-### 9.3 Sequence Length Impact
+### 7.3 Sequence Length Impact
 
 $$\text{Tokens per word} \approx f(|V|, \text{language})$$
 
@@ -507,89 +432,33 @@ $$\text{Tokens per word} \approx f(|V|, \text{language})$$
 
 Llama 3's jump from 32K to 128K vocabulary reduced Chinese token count by ~2×, making inference nearly twice as fast for Chinese text.
 
----
-
-## 10. Tokenizer Fertility & Efficiency
-
-### 10.1 Fertility
-
-**Fertility** measures how many tokens are produced per word (or per character for non-space-delimited languages):
-
-$$\text{Fertility}(\text{tokenizer}, \text{corpus}) = \frac{\text{total tokens produced}}{\text{total words in corpus}}$$
-
-Lower fertility = more efficient (fewer tokens, faster inference, more content fits in context window).
-
-### 10.2 Compression Ratio
-
-An alternative metric that measures how well the tokenizer compresses raw text:
-
-$$\text{Compression ratio} = \frac{\text{raw bytes}}{\text{number of tokens}}$$
-
-Higher compression = more efficient. Typical values: 3-5 bytes/token for English.
-
-### 10.3 Comparison Across Models
+### 7.4 Tokenization Strategies Compared
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│            Tokenizer Efficiency Comparison                    │
-├──────────────┬──────────┬──────────┬──────────┬─────────────┤
-│ Tokenizer    │ Vocab    │ English  │ Chinese  │ Code        │
-│              │ Size     │ Fert.    │ Fert.    │ Fert.       │
-├──────────────┼──────────┼──────────┼──────────┼─────────────┤
-│ GPT-2        │ 50,257   │ ~1.3     │ ~3.5     │ ~2.0        │
-│ Llama 2      │ 32,000   │ ~1.3     │ ~3.8     │ ~2.2        │
-│ GPT-4        │ 100,277  │ ~1.1     │ ~2.0     │ ~1.5        │
-│ Llama 3      │ 128,256  │ ~1.1     │ ~1.8     │ ~1.4        │
-│ Claude       │ ~100K    │ ~1.1     │ ~2.0     │ ~1.4        │
-└──────────────┴──────────┴──────────┴──────────┴─────────────┘
+Strategy        | OOV handling | Vocab size | Seq length | Example: "ChatGPT"
+----------------|--------------|------------|------------|--------------------
+Word-level      | FAIL (UNK)   | 50K-100K   | Short      | ["Chat", "G", "PT"] — OOV
+Character-level | Perfect      | ~100        | Very long  | ["C","h","a","t","G","P","T"]
+BPE             | Never OOV    | 30K-100K   | Medium     | ["Chat", "G", "PT"] or ["ChatGPT"]
+Byte-level BPE  | Never OOV    | 256+merges | Medium     | Always representable in bytes
 ```
 
-The trend is clear: newer models use larger vocabularies to improve efficiency, especially for non-English languages and code.
+**The fundamental tradeoff:**
+  Large vocabulary → fewer tokens per sentence (efficient) but rare tokens learned poorly
+  Small vocabulary → more tokens per sentence (expensive attention) but each token well-trained
+
+GPT-2/3/4 use ~50K vocab. Llama uses ~32K. Models with 100K+ vocab tokens become less common because
+the embedding table (vocab_size × d_model) gets large and rare tokens are under-trained.
 
 ---
 
-## 11. Multilingual Tokenization
+## 8. Tokenization & Model Performance
 
-### 11.1 The Equity Problem
-
-When a tokenizer is trained predominantly on English data, non-English languages receive poor coverage:
-
-$$\text{Cost per concept}(\text{language}) \propto \text{tokens per concept}(\text{language})$$
-
-If the same sentence takes 10 tokens in English but 30 tokens in Hindi:
-- Hindi uses 3× more context window
-- Hindi inference is 3× more expensive
-- Hindi has 3× less "reasoning space" within the same context limit
-
-### 11.2 Solutions
-
-**1. Larger vocabulary**: Llama 3 (128K tokens) vs Llama 2 (32K tokens) significantly improves non-English efficiency by including more CJK characters and non-Latin subwords as single tokens.
-
-**2. Balanced training data**: Train the tokenizer on a multilingual corpus with proportional representation:
-
-$$\mathcal{D}_{\text{tokenizer}} = \alpha_1 \cdot \text{English} + \alpha_2 \cdot \text{Chinese} + \alpha_3 \cdot \text{Hindi} + \ldots$$
-
-Adjusting $\alpha_i$ controls how well each language is served. But there's a trade-off: improving coverage for language $L$ means either increasing vocabulary size or reducing coverage for other languages.
-
-**3. Byte-level fallback**: SentencePiece and byte-level BPE ensure that even unrepresented languages can be tokenized (at the cost of very high fertility). No language produces `<unk>` tokens.
-
-### 11.3 The Curse of Multilinguality
-
-With a fixed vocabulary budget, adding more languages means fewer tokens per language:
-
-$$\text{Effective vocab per language} \approx \frac{|V|}{|\text{languages}|^{0.5}}$$
-
-The square root comes from Zipf's law — languages share common subword patterns, so the overlap is sublinear. But the tension remains: a 32K vocab serving 100 languages has far less per-language coverage than one serving English alone.
-
----
-
-## 12. Tokenization & Model Performance
-
-### 12.1 Tokenization Determines What the Model Can See
+### 8.1 Tokenization Determines What the Model Can See
 
 The model operates entirely in token space. If the tokenizer splits "COVID-19" into ["CO", "VID", "-", "19"], the model must learn through attention patterns that these four tokens represent a single entity. If the tokenizer keeps it as a single token "COVID-19", the model has direct access to the concept.
 
-### 12.2 Impact on Arithmetic and Reasoning
+### 8.2 Impact on Arithmetic and Reasoning
 
 LLMs famously struggle with arithmetic. Tokenization is a contributing factor:
 
@@ -608,7 +477,7 @@ Tokenization B: ["1", "2", "3", "4", "5", " +", " 6", "7", "8", "9", "0"]
 
 This is why some models use digit-level tokenization for numbers, at the cost of longer sequences.
 
-### 12.3 Impact on Code
+### 8.3 Impact on Code
 
 Code has unique tokenization challenges:
 - Indentation matters (Python): spaces/tabs must be preserved
@@ -618,7 +487,7 @@ Code has unique tokenization challenges:
 
 Models trained with code-aware tokenizers (larger vocabulary with code-specific tokens) perform better on coding benchmarks.
 
-### 12.4 The Glitch Token Phenomenon
+### 8.4 The Glitch Token Phenomenon
 
 Some tokens in the vocabulary are trained on very little data, leading to bizarre model behavior when these tokens appear:
 
@@ -630,9 +499,9 @@ When prompted with these tokens, models may produce incoherent or unexpected out
 
 ---
 
-## 13. Comparing Tokenizers Across Models
+## 9. Comparing Tokenizers Across Models
 
-### 13.1 Architecture Summary
+### 9.1 Architecture Summary
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -651,7 +520,7 @@ When prompted with these tokens, models may produce incoherent or unexpected out
 └───────────────┴─────────────┴──────────┴────────────────────────┘
 ```
 
-### 13.2 The Trend
+### 9.2 The Trend
 
 ```
          2018          2019-2022       2023-2024        2025+
@@ -673,7 +542,7 @@ The field is converging on **larger vocabularies** (100K+) with **byte-level fal
 
 ---
 
-## 14. Interview Questions & Answers
+## 10. Interview Questions & Answers
 
 ### Q1: Walk through the BPE algorithm step by step. How does it build the vocabulary?
 

@@ -1,13 +1,38 @@
-# AI Interview Question Bank — Reverse Preparation
+# AI Interview Question Bank — GenAI Scientist Track
 
-> **Purpose**: Self-testing question bank for AI Scientist / ML Engineer roles
-> **Format**: Questions only (no answers). Test yourself, then refer to your study notes.
-> **Difficulty**: `[E]` Easy (conceptual) · `[M]` Medium (analytical) · `[H]` Hard (system design / derivation)
-> **Coverage**: 35 merged topics across GenAI Scientist + AI/ML Engineer tracks
+## Table of Contents
+
+- [Topic 01: Probability, Statistics & Information Theory](#topic-01-probability-statistics--information-theory)
+- [Topic 02: Linear Algebra & Optimization](#topic-02-linear-algebra--optimization)
+- [Topic 03: Classical ML (Regression, Classification, Regularization)](#topic-03-classical-ml-regression-classification-regularization)
+- [Topic 04: Deep Learning Foundations (MLPs, Backprop, Activations)](#topic-04-deep-learning-foundations-mlps-backprop-activations)
+- [Topic 05: Tokenization & Text Preprocessing](#topic-05-tokenization--text-preprocessing)
+- [Topic 06: Word Embeddings (Word2Vec, GloVe, Sentence Embeddings)](#topic-06-word-embeddings-word2vec-glove-sentence-embeddings)
+- [Topic 07: RNNs, LSTMs & Sequence Models](#topic-07-rnns-lstms--sequence-models)
+- [Topic 08: Attention Mechanisms](#topic-08-attention-mechanisms)
+- [Topic 09: Transformer Architecture](#topic-09-transformer-architecture)
+- [Topic 10: Positional Encodings](#topic-10-positional-encodings)
+- [Topic 11: BERT & Encoder Models](#topic-11-bert--encoder-models)
+- [Topic 12: GPT, Decoder Models & Open-Source LLMs](#topic-12-gpt-decoder-models--open-source-llms)
+- [Topic 13: Encoder-Decoder Models (T5, BART, UL2)](#topic-13-encoder-decoder-models-t5-bart-ul2)
+- [Topic 14: Pretraining LLMs (Data, Distributed Training, Scaling)](#topic-14-pretraining-llms-data-distributed-training-scaling)
+- [Topic 15: Fine-Tuning & PEFT (LoRA, QLoRA, Adapters, DoRA)](#topic-15-fine-tuning--peft-lora-qlora-adapters-dora)
+- [Topic 16: Alignment (RLHF, DPO, Constitutional AI)](#topic-16-alignment-rlhf-dpo-constitutional-ai)
+- [Topic 17: Decoding Strategies & Text Generation](#topic-17-decoding-strategies--text-generation)
+- [Topic 18: Prompt Engineering & In-Context Learning](#topic-18-prompt-engineering--in-context-learning)
+- [Topic 19: LLM APIs & Function Calling](#topic-19-llm-apis--function-calling)
+- [Topic 20: RAG (Retrieval-Augmented Generation)](#topic-20-rag-retrieval-augmented-generation)
+- [Topic 21: AI Agents & Tool Use](#topic-21-ai-agents--tool-use)
+- [Topic 22: Multimodal AI (Vision-Language, Diffusion)](#topic-22-multimodal-ai-vision-language-diffusion)
+- [Topic 23: LLM Inference Optimization](#topic-23-llm-inference-optimization)
+- [Topic 24: ML System Design](#topic-24-ml-system-design)
+- [Topic 25: Evaluation & Benchmarking](#topic-25-evaluation--benchmarking)
+- [Topic 26: Safety, Ethics & Responsible AI](#topic-26-safety-ethics--responsible-ai)
+- [Topic 27: Research Frontiers (Mamba, MoE, Test-Time Compute)](#topic-27-research-frontiers-mamba-moe-test-time-compute)
 
 ---
 
-## Topic 1: Probability, Statistics & Information Theory
+## Topic 01: Probability, Statistics & Information Theory
 
 1. `[E]` What is Bayes' theorem? Write it out and explain each term.
 2. `[E]` What is the difference between a probability distribution and a probability density function?
@@ -29,7 +54,7 @@
 
 ---
 
-## Topic 2: Linear Algebra & Optimization
+## Topic 02: Linear Algebra & Optimization
 
 1. `[E]` What is the difference between an eigenvalue and a singular value?
 2. `[E]` What is PCA? What problem does it solve?
@@ -51,7 +76,7 @@
 
 ---
 
-## Topic 3: Classical ML (Regression, Classification, Regularization)
+## Topic 03: Classical ML (Regression, Classification, Regularization)
 
 1. `[E]` What is the bias-variance trade-off? How do you diagnose high bias vs high variance?
 2. `[E]` What is the difference between L1 and L2 regularization? Which one leads to sparse solutions and why?
@@ -74,27 +99,7 @@
 
 ---
 
-## Topic 4: Unsupervised Learning & Dimensionality Reduction
-
-1. `[E]` What is K-Means clustering? What are its assumptions?
-2. `[E]` What is the difference between PCA and t-SNE?
-3. `[E]` What is the elbow method for choosing K in K-Means?
-4. `[E]` What is the difference between hard and soft clustering?
-5. `[M]` How does DBSCAN work? What are its advantages over K-Means?
-6. `[M]` Explain UMAP. How does it differ from t-SNE in terms of global structure preservation?
-7. `[M]` What is the silhouette score? How do you use it to evaluate clustering quality?
-8. `[M]` Explain Gaussian Mixture Models (GMMs). How does EM algorithm fit them?
-9. `[M]` When would you use PCA vs autoencoders for dimensionality reduction?
-10. `[M]` What is anomaly detection? Compare isolation forest vs autoencoders for anomaly detection.
-11. `[H]` You have 10 million user embeddings and need to cluster them. K-Means is too slow. What alternatives do you have?
-12. `[H]` Explain the connection between PCA and the eigendecomposition of the covariance matrix. Derive it.
-13. `[H]` How would you evaluate the quality of embeddings produced by an LLM? What clustering or retrieval-based metrics would you use?
-14. `[H]` Explain hierarchical clustering (agglomerative vs divisive). When would you prefer it over K-Means?
-15. `[H]` You need to reduce a 768-dimensional embedding to 128 dimensions for a production system. Compare PCA, random projection, and learned projections. What are the trade-offs?
-
----
-
-## Topic 5: Deep Learning Foundations (MLPs, Backprop, Activations)
+## Topic 04: Deep Learning Foundations (MLPs, Backprop, Activations)
 
 1. `[E]` What is backpropagation? Explain it in terms of the chain rule.
 2. `[E]` What is the vanishing gradient problem? Which activations cause it?
@@ -116,70 +121,7 @@
 
 ---
 
-## Topic 6: Python & PyTorch for ML
-
-1. `[E]` What is the difference between a Python list and a NumPy array?
-2. `[E]` Explain Python generators. Why are they useful for ML data loading?
-3. `[E]` What is `torch.no_grad()` and when do you use it?
-4. `[E]` What is the difference between `model.eval()` and `model.train()` in PyTorch?
-5. `[E]` What is a PyTorch DataLoader? What parameters does it take?
-6. `[M]` Explain the PyTorch autograd system. What is the computation graph?
-7. `[M]` How do you implement a custom `nn.Module` in PyTorch? What methods must you define?
-8. `[M]` What is mixed precision training in PyTorch? How does `torch.cuda.amp` work?
-9. `[M]` Explain `DistributedDataParallel` (DDP). How does it differ from `DataParallel`?
-10. `[M]` How would you profile a PyTorch model to find performance bottlenecks?
-11. `[M]` What are Python decorators? Implement a timing decorator that measures function execution time.
-12. `[M]` Explain the difference between `deepcopy` and regular assignment for PyTorch model weights.
-13. `[H]` Implement a complete training loop in PyTorch with mixed precision, gradient accumulation, and gradient clipping.
-14. `[H]` How would you implement a custom learning rate scheduler that does warmup followed by cosine decay?
-15. `[H]` What is `torch.compile`? How does it speed up training? What are its limitations?
-16. `[H]` Implement a custom PyTorch Dataset for variable-length text sequences with dynamic batching and padding.
-17. `[H]` Explain how PyTorch handles memory on GPU. What causes OOM errors and how do you diagnose/fix them?
-
----
-
-## Topic 7: CNNs & Computer Vision
-
-1. `[E]` What is a convolution operation? What are filters/kernels?
-2. `[E]` What is the difference between stride and padding in a convolutional layer?
-3. `[E]` What is pooling? Compare max pooling and average pooling.
-4. `[E]` What is transfer learning in computer vision? Why does it work?
-5. `[M]` Explain the ResNet architecture. Why do skip connections enable training of very deep networks?
-6. `[M]` How do you calculate the output size of a convolutional layer given input size, kernel size, stride, and padding?
-7. `[M]` What is data augmentation? List 5 common augmentation techniques for image classification.
-8. `[M]` Explain the difference between object detection (YOLO) and semantic segmentation (U-Net).
-9. `[M]` What is batch normalization in CNNs? How does it affect training dynamics?
-10. `[M]` Compare EfficientNet and ResNet architectures. What is compound scaling?
-11. `[H]` Design a production image classification pipeline. Cover data collection, augmentation, model selection, training, evaluation, and deployment.
-12. `[H]` How does YOLO achieve real-time object detection? Explain the architecture and loss function.
-13. `[H]` What is the relationship between receptive field size and network depth? How do dilated convolutions change this?
-14. `[H]` Compare CNN-based approaches vs Vision Transformers (ViT) for image classification. When does each win?
-15. `[H]` Explain how CLIP connects vision and language. What is contrastive learning and how does it work in CLIP's training?
-16. `[H]` You need to deploy an image classification model that runs at 30 FPS on a mobile device. Walk through your optimization pipeline (quantization, pruning, ONNX export, etc.).
-
----
-
-## Topic 8: RNNs, LSTMs & Sequence Models
-
-1. `[E]` What is the basic RNN architecture? Draw the unrolled computation graph.
-2. `[E]` What is the vanishing gradient problem in RNNs?
-3. `[E]` What are the three gates in an LSTM and what does each do?
-4. `[E]` What is the difference between an LSTM and a GRU?
-5. `[M]` How does the LSTM cell state solve the vanishing gradient problem? Explain mathematically.
-6. `[M]` What is the Seq2Seq architecture? How is it used for machine translation?
-7. `[M]` What is teacher forcing? What problem does it cause (exposure bias)?
-8. `[M]` Explain bidirectional RNNs. When are they applicable and when are they not?
-9. `[M]` How do you handle variable-length sequences in RNNs? What is packing/padding?
-10. `[H]` Why did transformers replace RNNs for most NLP tasks? Compare computational complexity, parallelization, and long-range dependencies.
-11. `[H]` Derive the LSTM forward equations. Show how gradients flow through the cell state.
-12. `[H]` What is attention in the context of Seq2Seq? How does Bahdanau attention work?
-13. `[H]` You need to build a real-time speech-to-text system. Would you use an RNN, Transformer, or hybrid? Justify your choice.
-14. `[H]` Explain the CTC (Connectionist Temporal Classification) loss. Where is it used?
-15. `[H]` Compare RNNs, 1D CNNs, and Transformers for time series forecasting. What are the trade-offs?
-
----
-
-## Topic 9: Tokenization & Text Preprocessing
+## Topic 05: Tokenization & Text Preprocessing
 
 1. `[E]` What is tokenization? Why can't we just split on spaces?
 2. `[E]` What is the difference between word-level, character-level, and subword tokenization?
@@ -199,7 +141,7 @@
 
 ---
 
-## Topic 10: Word Embeddings (Word2Vec, GloVe, Sentence Embeddings)
+## Topic 06: Word Embeddings (Word2Vec, GloVe, Sentence Embeddings)
 
 1. `[E]` What is a word embedding? Why are they better than one-hot encoding?
 2. `[E]` Explain the distributional hypothesis: "You shall know a word by the company it keeps."
@@ -219,7 +161,27 @@
 
 ---
 
-## Topic 11: Attention Mechanisms
+## Topic 07: RNNs, LSTMs & Sequence Models
+
+1. `[E]` What is the basic RNN architecture? Draw the unrolled computation graph.
+2. `[E]` What is the vanishing gradient problem in RNNs?
+3. `[E]` What are the three gates in an LSTM and what does each do?
+4. `[E]` What is the difference between an LSTM and a GRU?
+5. `[M]` How does the LSTM cell state solve the vanishing gradient problem? Explain mathematically.
+6. `[M]` What is the Seq2Seq architecture? How is it used for machine translation?
+7. `[M]` What is teacher forcing? What problem does it cause (exposure bias)?
+8. `[M]` Explain bidirectional RNNs. When are they applicable and when are they not?
+9. `[M]` How do you handle variable-length sequences in RNNs? What is packing/padding?
+10. `[H]` Why did transformers replace RNNs for most NLP tasks? Compare computational complexity, parallelization, and long-range dependencies.
+11. `[H]` Derive the LSTM forward equations. Show how gradients flow through the cell state.
+12. `[H]` What is attention in the context of Seq2Seq? How does Bahdanau attention work?
+13. `[H]` You need to build a real-time speech-to-text system. Would you use an RNN, Transformer, or hybrid? Justify your choice.
+14. `[H]` Explain the CTC (Connectionist Temporal Classification) loss. Where is it used?
+15. `[H]` Compare RNNs, 1D CNNs, and Transformers for time series forecasting. What are the trade-offs?
+
+---
+
+## Topic 08: Attention Mechanisms
 
 1. `[E]` What is attention in neural networks? What problem does it solve?
 2. `[E]` What is self-attention? How does it differ from cross-attention?
@@ -241,7 +203,7 @@
 
 ---
 
-## Topic 12: Transformer Architecture
+## Topic 09: Transformer Architecture
 
 1. `[E]` Draw the transformer encoder and decoder architecture. Label all components.
 2. `[E]` What is the role of the feed-forward network (FFN) in each transformer layer?
@@ -262,7 +224,7 @@
 
 ---
 
-## Topic 13: Positional Encodings
+## Topic 10: Positional Encodings
 
 1. `[E]` Why do transformers need positional encodings? What information would be lost without them?
 2. `[E]` What are sinusoidal positional encodings? Why did the original transformer use them?
@@ -282,7 +244,7 @@
 
 ---
 
-## Topic 14: BERT & Encoder Models
+## Topic 11: BERT & Encoder Models
 
 1. `[E]` What is BERT? What pretraining objectives does it use?
 2. `[E]` What is Masked Language Modeling (MLM)? How does the 80/10/10 masking strategy work?
@@ -303,7 +265,7 @@
 
 ---
 
-## Topic 15: GPT, Decoder Models & Open-Source LLMs
+## Topic 12: GPT, Decoder Models & Open-Source LLMs
 
 1. `[E]` What is the GPT architecture? How does it differ from BERT?
 2. `[E]` What is causal language modeling (next-token prediction)?
@@ -324,7 +286,7 @@
 
 ---
 
-## Topic 16: Encoder-Decoder Models (T5, BART, UL2)
+## Topic 13: Encoder-Decoder Models (T5, BART, UL2)
 
 1. `[E]` What is the encoder-decoder architecture? How do encoder and decoder interact?
 2. `[E]` What is T5? What is its "text-to-text" framework?
@@ -344,7 +306,7 @@
 
 ---
 
-## Topic 17: Pretraining LLMs (Data, Distributed Training, Scaling)
+## Topic 14: Pretraining LLMs (Data, Distributed Training, Scaling)
 
 1. `[E]` What are the two phases of training an LLM (pretraining vs fine-tuning)?
 2. `[E]` Name 5 common data sources for LLM pretraining.
@@ -367,7 +329,7 @@
 
 ---
 
-## Topic 18: Fine-Tuning & PEFT (LoRA, QLoRA, Adapters, DoRA)
+## Topic 15: Fine-Tuning & PEFT (LoRA, QLoRA, Adapters, DoRA)
 
 1. `[E]` What is the difference between full fine-tuning and parameter-efficient fine-tuning (PEFT)?
 2. `[E]` What is LoRA? Explain the core idea in one sentence.
@@ -390,7 +352,7 @@
 
 ---
 
-## Topic 19: Alignment (RLHF, DPO, Constitutional AI)
+## Topic 16: Alignment (RLHF, DPO, Constitutional AI)
 
 1. `[E]` What does "alignment" mean for LLMs? What are the three H's?
 2. `[E]` What is RLHF? List the three steps of the RLHF pipeline.
@@ -412,7 +374,7 @@
 
 ---
 
-## Topic 20: Decoding Strategies & Text Generation
+## Topic 17: Decoding Strategies & Text Generation
 
 1. `[E]` What is greedy decoding? What is its main limitation?
 2. `[E]` What is temperature in LLM sampling? What happens at T=0 vs T=1 vs T>1?
@@ -433,7 +395,9 @@
 
 ---
 
-## Topic 21: Prompt Engineering & Advanced Techniques
+## Topic 18: Prompt Engineering & In-Context Learning
+
+### Prompt Engineering
 
 1. `[E]` What is the difference between zero-shot, one-shot, and few-shot prompting?
 2. `[E]` What is chain-of-thought (CoT) prompting? Why does adding "Let's think step by step" help?
@@ -450,32 +414,29 @@
 13. `[H]` Design a guardrails system for a customer-facing LLM chatbot (input validation, output validation, content policy).
 14. `[H]` What is the difference between OpenAI's `response_format: json_object` and Structured Outputs (`json_schema`)? When would you use each?
 15. `[H]` You're building a data extraction pipeline that works 95% of the time. How do you get to 99%? Walk through your debugging and improvement process.
-16. `[H]` What are the theoretical reasons that in-context learning works? Is the model doing gradient descent, Bayesian inference, or something else?
-17. `[H]` Design a prompt management system for a team of 10 ML engineers. How do you version, test, and deploy prompts?
+16. `[H]` Design a prompt management system for a team of 10 ML engineers. How do you version, test, and deploy prompts?
+
+### In-Context Learning (Theory)
+
+17. `[E]` What is in-context learning (ICL)? How does it differ from fine-tuning?
+18. `[E]` What is a demonstration in ICL? What does it consist of?
+19. `[M]` Does ICL learn new tasks or just activate existing capabilities? What does the research say?
+20. `[M]` How does the order of few-shot examples affect ICL performance?
+21. `[M]` What is the role of the label space in ICL? Does the model use the actual labels or just the format?
+22. `[M]` Explain the hypothesis that ICL performs implicit gradient descent (Akyürek et al., 2022).
+23. `[M]` What is the Bayesian interpretation of ICL (Xie et al., 2022)?
+24. `[H]` How do transformers implement ICL mechanistically? What do the attention heads learn?
+25. `[H]` What are "induction heads"? How do they enable ICL?
+26. `[H]` Does ICL performance correlate with model scale? What are emergent abilities in the context of ICL?
+27. `[H]` Compare ICL with fine-tuning on the same number of examples. Under what conditions does each win?
+28. `[H]` What is the connection between ICL and meta-learning? How does pretraining create a meta-learner?
+29. `[H]` What is the theoretical reasons that in-context learning works? Is the model doing gradient descent, Bayesian inference, or something else?
+30. `[H]` How does the pretraining distribution affect ICL capability? Why do some models exhibit stronger ICL than others?
+31. `[H]` What is the role of the attention mechanism in enabling ICL? Could an RNN exhibit similar in-context learning?
 
 ---
 
-## Topic 22: In-Context Learning (Theory)
-
-1. `[E]` What is in-context learning (ICL)? How does it differ from fine-tuning?
-2. `[E]` What is a demonstration in ICL? What does it consist of?
-3. `[M]` Does ICL learn new tasks or just activate existing capabilities? What does the research say?
-4. `[M]` How does the order of few-shot examples affect ICL performance?
-5. `[M]` What is the role of the label space in ICL? Does the model use the actual labels or just the format?
-6. `[M]` Explain the hypothesis that ICL performs implicit gradient descent (Akyürek et al., 2022).
-7. `[M]` What is the Bayesian interpretation of ICL (Xie et al., 2022)?
-8. `[H]` How do transformers implement ICL mechanistically? What do the attention heads learn?
-9. `[H]` What are "induction heads"? How do they enable ICL?
-10. `[H]` Does ICL performance correlate with model scale? What are emergent abilities in the context of ICL?
-11. `[H]` Compare ICL with fine-tuning on the same number of examples. Under what conditions does each win?
-12. `[H]` What is the connection between ICL and meta-learning? How does pretraining create a meta-learner?
-13. `[H]` Design an experiment to test whether ICL is doing task identification vs task learning. How would you distinguish the two?
-14. `[H]` How does the pretraining distribution affect ICL capability? Why do some models exhibit stronger ICL than others?
-15. `[H]` What is the role of the attention mechanism in enabling ICL? Could an RNN exhibit similar in-context learning?
-
----
-
-## Topic 23: LLM APIs & Function Calling
+## Topic 19: LLM APIs & Function Calling
 
 1. `[E]` What are the key parameters of an LLM API call (model, temperature, max_tokens, etc.)?
 2. `[E]` What is function calling / tool use in LLM APIs?
@@ -495,7 +456,7 @@
 
 ---
 
-## Topic 24: RAG (Retrieval-Augmented Generation)
+## Topic 20: RAG (Retrieval-Augmented Generation)
 
 1. `[E]` What is RAG? Why is it needed?
 2. `[E]` What are the two phases of a RAG pipeline (indexing and querying)?
@@ -518,7 +479,7 @@
 
 ---
 
-## Topic 25: AI Agents & Tool Use
+## Topic 21: AI Agents & Tool Use
 
 1. `[E]` What is an AI agent? How does it differ from a simple LLM call?
 2. `[E]` What are the four components of an agent (LLM + tools + memory + loop)?
@@ -540,7 +501,7 @@
 
 ---
 
-## Topic 26: Multimodal AI (Vision-Language, Diffusion)
+## Topic 22: Multimodal AI (Vision-Language, Diffusion)
 
 1. `[E]` What is multimodal AI? Give 3 examples of multimodal tasks.
 2. `[E]` What is CLIP? How does it connect images and text?
@@ -562,7 +523,7 @@
 
 ---
 
-## Topic 27: LLM Inference Optimization (Quantization, KV Cache, Flash Attention)
+## Topic 23: LLM Inference Optimization
 
 1. `[E]` Why is LLM inference expensive? What are the main bottlenecks?
 2. `[E]` What is quantization? What does it mean to go from FP16 to INT4?
@@ -584,29 +545,7 @@
 
 ---
 
-## Topic 28: Evaluation & Benchmarking
-
-1. `[E]` What is perplexity? How do you interpret it?
-2. `[E]` What are BLEU and ROUGE scores? When are they used?
-3. `[E]` Name 5 popular LLM benchmarks and what they measure.
-4. `[E]` What is LLM-as-a-judge evaluation? Why is it used?
-5. `[M]` What is BERTScore? How does it improve upon BLEU/ROUGE?
-6. `[M]` Explain the MMLU benchmark. What does it measure and what are its limitations?
-7. `[M]` How do you evaluate a chatbot? What metrics capture helpfulness, safety, and fluency?
-8. `[M]` What is contamination in LLM evaluation? How do you detect and mitigate it?
-9. `[M]` What is the difference between automatic evaluation, human evaluation, and model-based evaluation?
-10. `[M]` What is HumanEval? How do you evaluate code generation models?
-11. `[H]` Design an evaluation framework for a RAG-based Q&A system. Cover retrieval quality, answer quality, and faithfulness.
-12. `[H]` You're comparing two LLMs for a production task. Design a rigorous evaluation protocol that goes beyond benchmark scores.
-13. `[H]` What is the Chatbot Arena (LMSYS)? How does Elo rating work for LLM evaluation? What are its limitations?
-14. `[H]` Why are LLM benchmarks becoming saturated? How should the field design next-generation evaluation?
-15. `[H]` Explain the RAGAS framework for RAG evaluation. What are faithfulness, answer relevancy, context precision, and context recall?
-16. `[H]` How do you evaluate an AI agent? What metrics capture task completion rate, efficiency, tool usage accuracy, and reliability?
-17. `[H]` What is the difference between capability evaluation and safety evaluation? Design a red-teaming protocol for an LLM.
-
----
-
-## Topic 29: ML System Design
+## Topic 24: ML System Design
 
 1. `[E]` What are the key components of an ML system (data, features, model, serving, monitoring)?
 2. `[E]` What is the difference between online prediction and batch prediction?
@@ -628,71 +567,29 @@
 
 ---
 
-## Topic 30: Model Deployment & Serving
+## Topic 25: Evaluation & Benchmarking
 
-1. `[E]` What is FastAPI? Why is it popular for serving ML models?
-2. `[E]` What is Docker? Why is containerization important for ML deployment?
-3. `[E]` What is the difference between a CPU and GPU deployment?
-4. `[M]` How do you serve a PyTorch model with FastAPI? What are the key considerations?
-5. `[M]` What is model serialization? Compare Pickle, ONNX, and TorchScript.
-6. `[M]` What is a multi-stage Docker build? Why is it important for ML containers?
-7. `[M]` How do you implement health checks, logging, and monitoring for a deployed model?
-8. `[M]` What is ONNX Runtime? How does it speed up inference?
-9. `[M]` Compare AWS SageMaker, GCP Vertex AI, and Azure ML for model deployment.
-10. `[H]` Design a scalable model serving architecture that handles 10K requests per second with auto-scaling.
-11. `[H]` How do you implement model versioning and A/B testing in production?
-12. `[H]` What is canary deployment? How does it differ from blue-green deployment for ML models?
-13. `[H]` Design a streaming LLM serving system. How do you handle Server-Sent Events (SSE) and WebSocket connections?
-14. `[H]` What is serverless ML deployment (e.g., Modal, AWS Lambda)? When is it appropriate and when is it not?
-15. `[H]` How do you load test an ML API? Design a load testing strategy using Locust or k6.
-16. `[H]` You have a model that takes 500ms per inference. Users need < 100ms latency. What optimization strategies would you explore?
-
----
-
-## Topic 31: MLOps (Tracking, CI/CD, Monitoring)
-
-1. `[E]` What is MLOps? How does it differ from DevOps?
-2. `[E]` What is experiment tracking? Why is it important?
-3. `[E]` What is MLflow? What are its key components?
-4. `[E]` What is CI/CD for ML? How does it differ from software CI/CD?
-5. `[M]` Compare MLflow and Weights & Biases (W&B). When would you use each?
-6. `[M]` Design a GitHub Actions CI/CD pipeline for an ML model. What stages would it include?
-7. `[M]` What are ML-specific tests (data validation, model quality checks, bias checks)?
-8. `[M]` What is a model registry? How does it manage model versions and deployment stages?
-9. `[M]` Explain data drift detection. What statistical tests would you use (KS test, PSI)?
-10. `[M]` What is Prometheus + Grafana monitoring? How do you use them for ML services?
-11. `[H]` Design a complete MLOps pipeline from data ingestion to model deployment with automated retraining.
-12. `[H]` How do you detect and handle concept drift (not just data drift)? When should you retrain vs update vs rollback?
-13. `[H]` Design a monitoring system for an LLM-powered chatbot. What metrics do you track beyond standard ML metrics?
-14. `[H]` What is a feature store (e.g., Feast, Tecton)? How does it solve the training-serving skew problem?
-15. `[H]` Compare pipeline orchestration tools: Airflow, Prefect, Dagster. When would you use each?
-16. `[H]` You noticed your model's accuracy dropped 5% over the past week in production. Walk through your debugging process.
-17. `[H]` Design a quality gate system that automatically blocks bad models from reaching production.
+1. `[E]` What is perplexity? How do you interpret it?
+2. `[E]` What are BLEU and ROUGE scores? When are they used?
+3. `[E]` Name 5 popular LLM benchmarks and what they measure.
+4. `[E]` What is LLM-as-a-judge evaluation? Why is it used?
+5. `[M]` What is BERTScore? How does it improve upon BLEU/ROUGE?
+6. `[M]` Explain the MMLU benchmark. What does it measure and what are its limitations?
+7. `[M]` How do you evaluate a chatbot? What metrics capture helpfulness, safety, and fluency?
+8. `[M]` What is contamination in LLM evaluation? How do you detect and mitigate it?
+9. `[M]` What is the difference between automatic evaluation, human evaluation, and model-based evaluation?
+10. `[M]` What is HumanEval? How do you evaluate code generation models?
+11. `[H]` Design an evaluation framework for a RAG-based Q&A system. Cover retrieval quality, answer quality, and faithfulness.
+12. `[H]` You're comparing two LLMs for a production task. Design a rigorous evaluation protocol that goes beyond benchmark scores.
+13. `[H]` What is the Chatbot Arena (LMSYS)? How does Elo rating work for LLM evaluation? What are its limitations?
+14. `[H]` Why are LLM benchmarks becoming saturated? How should the field design next-generation evaluation?
+15. `[H]` Explain the RAGAS framework for RAG evaluation. What are faithfulness, answer relevancy, context precision, and context recall?
+16. `[H]` How do you evaluate an AI agent? What metrics capture task completion rate, efficiency, tool usage accuracy, and reliability?
+17. `[H]` What is the difference between capability evaluation and safety evaluation? Design a red-teaming protocol for an LLM.
 
 ---
 
-## Topic 32: Databases & Data Infrastructure for ML
-
-1. `[E]` What is the difference between SQL and NoSQL databases? When would you use each?
-2. `[E]` What are SQL JOINs? Explain INNER, LEFT, RIGHT, and FULL JOIN.
-3. `[E]` What is Redis? What are its common use cases in ML systems?
-4. `[E]` What is a vector database? How does it differ from a traditional database?
-5. `[M]` Write a SQL query using window functions (ROW_NUMBER, RANK, LAG) for feature engineering.
-6. `[M]` Compare FAISS, ChromaDB, Pinecone, and Qdrant as vector databases. What are the trade-offs?
-7. `[M]` Explain HNSW (Hierarchical Navigable Small World) for approximate nearest neighbor search.
-8. `[M]` How do you use Redis for ML prediction caching and rate limiting?
-9. `[M]` What is PostgreSQL? How would you store ML features and model metadata in it?
-10. `[M]` What is Apache Kafka? How is it used in real-time ML pipelines?
-11. `[H]` Design a data infrastructure for a real-time recommendation system. Cover data ingestion (Kafka), feature store (Redis), model serving, and logging (PostgreSQL).
-12. `[H]` Compare IVF, HNSW, and Product Quantization for vector search. When would you use each indexing strategy?
-13. `[H]` You need to store and query 100M embeddings with < 10ms latency. Design the vector search infrastructure.
-14. `[H]` What are the consistency vs availability trade-offs (CAP theorem) for ML serving systems?
-15. `[H]` Design an ETL pipeline that ingests data from 5 different sources, cleans it, computes features, and stores them for both training and real-time serving.
-16. `[H]` Compare data warehouses (BigQuery, Snowflake, Redshift) for ML analytics. What features matter most?
-
----
-
-## Topic 33: Safety, Ethics & Responsible AI
+## Topic 26: Safety, Ethics & Responsible AI
 
 1. `[E]` What is AI hallucination? Give 3 examples.
 2. `[E]` What is bias in ML? Name 3 types of bias (selection, measurement, representation).
@@ -714,7 +611,7 @@
 
 ---
 
-## Topic 34: Research Frontiers (Mamba, MoE, Test-Time Compute)
+## Topic 27: Research Frontiers (Mamba, MoE, Test-Time Compute)
 
 1. `[E]` What is a State Space Model (SSM)? How does it differ from a transformer?
 2. `[E]` What is Mixture of Experts (MoE)? What is a router?
@@ -736,35 +633,43 @@
 
 ---
 
-## Topic 35: Recommendation Systems & Time Series
-
-1. `[E]` What is collaborative filtering? What is the cold start problem?
-2. `[E]` What is the difference between content-based and collaborative filtering?
-3. `[E]` What is a time series? What makes it different from regular tabular data?
-4. `[E]` What is stationarity? Why is it important for forecasting?
-5. `[M]` Explain matrix factorization for recommendations. How does it decompose the user-item matrix?
-6. `[M]` What is the two-tower model for recommendations? How does it enable real-time serving?
-7. `[M]` Explain ARIMA. What are the (p, d, q) parameters?
-8. `[M]` How do you create lag features for ML-based time series forecasting?
-9. `[M]` What is the difference between point forecasting and probabilistic forecasting?
-10. `[M]` How do you properly do cross-validation for time series data? Why can't you use standard k-fold?
-11. `[H]` Design a recommendation system for a video streaming platform. Cover candidate generation, ranking, re-ranking, and diversity.
-12. `[H]` Compare deep learning approaches to recommendations: NCF, DeepFM, two-tower, sequence-based (SASRec). When does each win?
-13. `[H]` You're forecasting demand for 10,000 products across 500 stores. How would you structure this problem? Would you use one global model or individual models?
-14. `[H]` How do you handle multiple seasonalities (daily, weekly, yearly) in time series forecasting?
-15. `[H]` What is the candidate generation → ranking → re-ranking pipeline in production recommendation systems? What models and infrastructure are used at each stage?
-16. `[H]` Compare XGBoost, LSTM, and Transformer-based models for time series forecasting. When does each approach win?
-17. `[H]` How do you evaluate a recommendation system? Explain offline metrics (NDCG, MAP), online metrics (CTR, engagement), and the gap between them.
-
----
-
 ## Summary
 
-| Difficulty | Count |
-|-----------|-------|
-| `[E]` Easy | ~155 |
-| `[M]` Medium | ~185 |
-| `[H]` Hard | ~255 |
-| **Total** | **~595** |
+| Topic | Name | Questions |
+|-------|------|-----------|
+| 01 | Probability, Statistics & Information Theory | 17 |
+| 02 | Linear Algebra & Optimization | 17 |
+| 03 | Classical ML | 18 |
+| 04 | Deep Learning Foundations | 17 |
+| 05 | Tokenization | 15 |
+| 06 | Word Embeddings | 15 |
+| 07 | RNNs & Sequence Models | 15 |
+| 08 | Attention Mechanisms | 17 |
+| 09 | Transformer Architecture | 16 |
+| 10 | Positional Encodings | 15 |
+| 11 | BERT & Encoder Models | 16 |
+| 12 | GPT & Open-Source LLMs | 16 |
+| 13 | Encoder-Decoder Models | 15 |
+| 14 | Pretraining LLMs | 18 |
+| 15 | Fine-Tuning & PEFT | 18 |
+| 16 | Alignment (RLHF, DPO) | 17 |
+| 17 | Decoding Strategies | 16 |
+| 18 | Prompt Engineering & ICL | 31 |
+| 19 | LLM APIs & Function Calling | 15 |
+| 20 | RAG | 18 |
+| 21 | AI Agents & Tool Use | 17 |
+| 22 | Multimodal AI | 17 |
+| 23 | LLM Inference Optimization | 17 |
+| 24 | ML System Design | 17 |
+| 25 | Evaluation & Benchmarking | 17 |
+| 26 | Safety, Ethics & Responsible AI | 17 |
+| 27 | Research Frontiers | 17 |
+| **Total** | | **~470** |
 
-> **How to use**: Pick a topic, cover the `[E]` questions first to verify foundations, then test yourself on `[M]` for depth, and `[H]` for interview-level performance. Refer to your study notes for answers.
+| Difficulty | Approximate Count |
+|-----------|-------------------|
+| `[E]` Easy | ~105 |
+| `[M]` Medium | ~145 |
+| `[H]` Hard | ~220 |
+
+> **How to use**: Pick a topic matching your GenAI Scientist study file (e.g., Topic 08 maps to `08_Attention_Mechanisms.md`). Cover `[E]` questions first to verify foundations, then `[M]` for depth, and `[H]` for interview-level performance.

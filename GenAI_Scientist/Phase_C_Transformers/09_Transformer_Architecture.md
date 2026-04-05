@@ -25,8 +25,7 @@
 12. [Parameter Counting — Know Your Model Size](#12-parameter-counting--know-your-model-size)
 13. [The Three Variants — Encoder-Only, Decoder-Only, Encoder-Decoder](#13-the-three-variants--encoder-only-decoder-only-encoder-decoder)
 14. [Modern Transformer Design Choices (2023-2026)](#14-modern-transformer-design-choices-2023-2026)
-15. [Common Misconceptions](#15-common-misconceptions)
-16. [Interview Questions & Answers](#16-interview-questions--answers)
+15. [Interview Questions & Answers](#15-interview-questions--answers)
 
 ---
 
@@ -675,6 +674,35 @@ $$
 
 This is necessary because in Pre-LN, the output of the last block is an unnormalized residual sum. Without this final norm, the output magnitudes would grow with depth.
 
+### 9.7 Pre-LN vs Post-LN Gradient Flow
+
+**Post-LN** (original transformer, BERT):
+```
+x → [Attention] → x + attn_out → [LayerNorm] → [FFN] → x + ffn_out → [LayerNorm]
+                                       ↑                                    ↑
+                              normalization happens AFTER residual    normalization AFTER
+```
+
+Gradient flow problem:
+  ∂L/∂x_early = ∂L/∂x_late × (large product of Jacobians)
+  LayerNorm after residual still allows gradients to blow up in very deep networks.
+  Requires careful learning rate warmup (LR too large early = divergence).
+
+**Pre-LN** (GPT-2+, Llama):
+```
+x → [LayerNorm] → [Attention] → x + attn_out → [LayerNorm] → [FFN] → x + ffn_out
+         ↑                                            ↑
+  normalization BEFORE                        normalization BEFORE
+```
+
+Gradient flow benefit:
+  The residual stream x bypasses LayerNorm entirely.
+  ∂L/∂x = ∂L/∂(x + f(LN(x))) = ∂L/∂output × (1 + ∂f/∂x)
+  The "1" ensures gradient flows back through the residual without going through
+  the normalization. More stable training, no warmup required, can use higher LR.
+
+**In practice**: Pre-LN + no warmup can still diverge for very deep models. Most modern LLMs (Llama 2, GPT-4 family) use Pre-LN with warmup as a safety measure. Some use additional techniques like QK-norm (normalize Q and K in attention).
+
 ---
 
 ## 10. The Output Head
@@ -811,6 +839,51 @@ Time step 3: Input = [<start>, J'aime, les]
 | **Causal mask** | Applied to prevent future leakage | Naturally satisfied (future tokens don't exist yet) |
 | **Speed** | Fast (parallel) | Slow (sequential), mitigated by KV cache |
 
+### 11.4 Forward Pass Trace: One Token Through BERT-base
+
+Let's trace the token "Paris" through a single transformer block in BERT-base.
+
+**Dimensions**: d_model=768, h=12 heads, d_k=64, d_ff=3072
+
+**Step 1 — Embedding lookup**:
+  "Paris" → token ID 3000 → look up row 3000 in embedding matrix (50K×768)
+  Result: x₀ = [0.23, -0.11, 0.45, ..., 0.08]  (768-dim vector)
+  Add positional encoding: x₀ = x₀ + PE(position)
+
+**Step 2 — Layer Normalization** (Pre-LN models normalize before attention):
+  x_norm = LayerNorm(x₀)
+  Adjusts mean to 0, std to 1 across the 768 dimensions for this token
+
+**Step 3 — Multi-Head Self-Attention**:
+  Project to Q, K, V (separately for each of 12 heads):
+    Q_i = x_norm @ W_Q^i    (768 → 64 dim per head)
+    K_i = x_norm @ W_K^i    (768 → 64 dim)
+    V_i = x_norm @ W_V^i    (768 → 64 dim)
+  
+  Compute attention for head i:
+    scores = Q_i @ K_all^T / √64    (1×64 @ 64×T = 1×T scores)
+    weights = softmax(scores)        (1×T probability distribution)
+    head_i = weights @ V_all^i      (1×T @ T×64 = 1×64)
+  
+  Concatenate 12 heads: [head_1 | ... | head_12]  → 768-dim
+  Apply output projection W_O: 768 → 768
+
+**Step 4 — Residual connection**:
+  x₁ = x₀ + attention_output   (skip connection adds original input)
+
+**Step 5 — Feed-Forward Network**:
+  x_ff = LayerNorm(x₁)
+  h = GeLU(x_ff @ W₁ + b₁)    (768 → 3072, then activation)
+  output = h @ W₂ + b₂         (3072 → 768)
+  x₂ = x₁ + output             (second residual)
+
+**Result**: x₂ is the new representation of "Paris" after one block — 768-dim, now contextualized.
+Repeat for all 12 layers. Final x is the representation used for downstream tasks.
+
+**Key numbers for BERT-base**:
+  Token → 768-dim → 12 heads × 64-dim attention → 768-dim FFN input → 3072-dim hidden → 768-dim output
+  Per layer: 12M parameters. Total 12 layers: ~110M parameters.
+
 ---
 
 ## 12. Parameter Counting — Know Your Model Size
@@ -944,6 +1017,33 @@ LayerNorm:          ~0.01% of total parameters
 ```
 
 The FFN dominates. This is why techniques like MoE (Mixture of Experts) target the FFN — it's where most of the model's knowledge is stored.
+
+### 12.X BERT-base Parameter Count — Worked Example
+
+d_model = 768, h = 12 heads, d_ff = 3072, L = 12 layers, vocab = 30,522
+
+**Per transformer block**:
+
+| Component | Formula | Count |
+|-----------|---------|-------|
+| Q, K, V projections | 3 × (768×64) × 12 heads | 1,769,472 |
+| Output projection W_O | 768×768 | 589,824 |
+| FFN W₁ | 768×3072 | 2,359,296 |
+| FFN W₂ | 3072×768 | 2,359,296 |
+| Layer norms (×2) | 2 × 2×768 | 3,072 |
+| **Per block total** | | **~7.1M** |
+
+**Total model**:
+
+| Component | Count |
+|-----------|-------|
+| Token embeddings | 30,522 × 768 = 23.4M |
+| Position embeddings | 512 × 768 = 0.4M |
+| 12 transformer blocks | 12 × 7.1M = 85.2M |
+| Final layer norm | 1.5K |
+| **Total** | **~109M** |
+
+Rule of thumb: d_model² × 12L parameters for just the transformer blocks. Embedding table adds vocab×d_model on top.
 
 ---
 
@@ -1145,33 +1245,15 @@ $$
 **Advantage**: Attention and FFN can be computed simultaneously → ~15% faster training.
 **Disadvantage**: Slightly worse performance at small scale; negligible difference at large scale.
 
----
+**Key Misconceptions to Know in Interviews:**
 
-## 15. Common Misconceptions
-
-### Misconception 1: "Transformers understand sequence order through attention"
-
-**Reality**: Attention is permutation-equivariant. Without positional encodings, `[cat, sat, mat]` and `[mat, cat, sat]` would produce identical attention patterns. Positional encodings are the *only* source of order information.
-
-### Misconception 2: "The FFN is just a non-linear transformation"
-
-**Reality**: The FFN stores the majority of the model's factual knowledge. It acts as a key-value memory where each neuron detects a pattern and outputs associated information. This is why scaling the FFN (more neurons) directly increases the model's knowledge capacity.
-
-### Misconception 3: "Bigger model = more layers"
-
-**Reality**: You can make a model bigger by increasing width ($d_{\text{model}}$), depth ($L$), or FFN dimension ($d_{ff}$). Modern evidence suggests **width** scales more efficiently than depth. GPT-3 175B has 96 layers; Llama 3 70B has 80 layers but is more capable due to better width/depth ratio and more training data.
-
-### Misconception 4: "Encoder-decoder is better for generation tasks"
-
-**Reality**: Decoder-only models have proven equally capable at generation tasks (translation, summarization) when scaled sufficiently. The decoder-only architecture is simpler and scales more predictably, which is why it became the dominant paradigm.
-
-### Misconception 5: "Residual connections are just skip connections"
-
-**Reality**: While inspired by ResNet's skip connections, the transformer's residual connections play a more fundamental role. They create a **residual stream** — a shared communication bus that all layers read from and write to. Each layer adds a small delta to this stream. The final representation is the sum of the original input and all layers' contributions.
+- **"Transformers understand order through attention"** — False. Attention is permutation-equivariant. Without positional encodings, `[cat, sat, mat]` and `[mat, cat, sat]` would produce identical outputs. Positional encodings are the *only* source of order information.
+- **"The FFN is just a non-linear transformation"** — Incomplete. The FFN stores the majority of factual knowledge. Each neuron detects a pattern and outputs associated information; scaling the FFN directly increases knowledge capacity.
+- **"Bigger model = more layers"** — False. You scale by increasing width (d_model), depth (L), or FFN dimension (d_ff). Modern evidence shows width scales more efficiently than depth.
 
 ---
 
-## 16. Interview Questions & Answers
+## 15. Interview Questions & Answers
 
 ### Q1: Draw the full transformer architecture from memory and explain every component.
 

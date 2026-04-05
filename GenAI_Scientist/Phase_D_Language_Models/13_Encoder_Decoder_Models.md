@@ -14,16 +14,13 @@
 1. [The Encoder-Decoder Philosophy](#1-the-encoder-decoder-philosophy)
 2. [T5 — Text-to-Text Transfer Transformer](#2-t5--text-to-text-transfer-transformer)
 3. [T5's Pretraining: Span Corruption](#3-t5s-pretraining-span-corruption)
-4. [The C4 Dataset](#4-the-c4-dataset)
-5. [T5's Systematic Exploration](#5-t5s-systematic-exploration)
-6. [BART — Denoising Sequence-to-Sequence](#6-bart--denoising-sequence-to-sequence)
-7. [mBART & Multilingual Encoder-Decoders](#7-mbart--multilingual-encoder-decoders)
-8. [UL2 — Unifying Pretraining Objectives](#8-ul2--unifying-pretraining-objectives)
-9. [Prefix LM — The Hybrid Approach](#9-prefix-lm--the-hybrid-approach)
-10. [Flan-T5 & Instruction-Tuned Encoder-Decoders](#10-flan-t5--instruction-tuned-encoder-decoders)
-11. [The Great Debate: Why Decoder-Only Won](#11-the-great-debate-why-decoder-only-won)
-12. [When Encoder-Decoder Still Wins](#12-when-encoder-decoder-still-wins)
-13. [Interview Questions & Answers](#13-interview-questions--answers)
+4. [T5's Systematic Exploration](#4-t5s-systematic-exploration)
+5. [BART — Denoising Sequence-to-Sequence](#5-bart--denoising-sequence-to-sequence)
+6. [Prefix LM — The Hybrid Approach](#6-prefix-lm--the-hybrid-approach)
+7. [Flan-T5 & Instruction-Tuned Encoder-Decoders](#7-flan-t5--instruction-tuned-encoder-decoders)
+8. [The Great Debate: Why Decoder-Only Won](#8-the-great-debate-why-decoder-only-won)
+9. [When Encoder-Decoder Still Wins](#9-when-encoder-decoder-still-wins)
+10. [Interview Questions & Answers](#10-interview-questions--answers)
 
 ---
 
@@ -241,57 +238,43 @@ You could train an encoder-decoder with CLM by feeding the full input to the enc
 
 Span corruption naturally trains all three components: encoder (reads corrupted input), cross-attention (decoder reads encoder output to fill spans), and decoder (generates span content autoregressively).
 
----
+### 3.6 T5 Span Corruption — Visual Walkthrough
 
-## 4. The C4 Dataset
+Original sentence: "The quick brown fox jumps over the lazy dog"
 
-### 4.1 Colossal Clean Crawled Corpus
+**Step 1**: Randomly select spans (avg length 3, ~15% of tokens masked):
 
-T5 was pretrained on **C4** (Colossal Clean Crawled Corpus), a cleaned version of Common Crawl:
+Spans selected: ["quick brown"] at positions 1-2 and ["lazy"] at position 7
 
-| Property | Value |
-|----------|-------|
-| Source | Common Crawl (April 2019 snapshot) |
-| Raw size | ~750 GB of text |
-| Cleaned size | ~305 GB (~156B tokens) |
-| Language | English only |
-
-### 4.2 Cleaning Pipeline
+**Step 2**: Replace each span with a single sentinel token:
 
 ```
-Common Crawl (raw web)
-       │
-       ▼
-  Language filter ──── Keep only English pages
-       │
-       ▼
-  Deduplication ───── Remove exact and near-duplicate pages
-       │
-       ▼
-  Quality heuristics:
-  ├── Remove pages with < 5 sentences
-  ├── Remove pages with too many "bad words" (profanity list)
-  ├── Remove pages with "lorem ipsum" or boilerplate
-  ├── Remove pages ending with "javascript must be enabled"
-  └── Keep only lines ending with terminal punctuation
-       │
-       ▼
-  C4: ~305 GB clean English text
+Input:  "The <X> fox jumps over the <Y> dog"
+Target: "<X> quick brown <Y> lazy <EOS>"
 ```
 
-### 4.3 Impact
+**Why this design**:
+- Corrupting SPANS (not individual tokens) makes the task harder → richer representations
+- Sentinel tokens encode "which gap" so the decoder knows where each span goes
+- Predicting only the masked spans (not the full sequence) is more compute-efficient than full seq2seq
+- T5 can denoise multiple spans in one forward pass
 
-C4 became a standard pretraining corpus used by many subsequent models. The cleaning heuristics were simple but effective, and the paper's transparency about data processing set a standard for the field.
+**Comparison to BERT**:
 
-**Limitation**: C4 is English-only and reflects 2019 web content. Modern pretraining uses much larger, more diverse, more carefully curated datasets (see [Topic 14](14_Pretraining.md)).
+```
+BERT:  [CLS] The [MASK] brown [MASK] jumps ... [SEP]  → predict individual tokens
+T5:    "The <X> fox jumps ..."  → generate "quick brown" for <X>
+```
+
+T5's span corruption creates harder reconstruction tasks and forces the model to understand longer-range dependencies within the corrupted span.
 
 ---
 
-## 5. T5's Systematic Exploration
+## 4. T5's Systematic Exploration
 
 One of T5's greatest contributions was its **systematic ablation study** — testing dozens of design choices to identify what matters. This is a model for how AI research should be conducted.
 
-### 5.1 What They Tested
+### 4.1 What They Tested
 
 The paper explored a combinatorial space of design choices:
 
@@ -331,7 +314,7 @@ The paper explored a combinatorial space of design choices:
 | Prefix LM | Shared params, bidirectional prefix | Close to enc-dec |
 | Shared encoder-decoder | Share all weights between enc and dec | Slightly worse than unshared |
 
-### 5.2 The Key Finding on Architecture
+### 4.2 The Key Finding on Architecture
 
 At the same number of parameters and the same compute budget:
 
@@ -343,18 +326,41 @@ $$
 
 **But the comparison is nuanced**: A fair comparison should use the same **FLOPs**, not the same **parameters**. An encoder-decoder with $L$ encoder layers and $L$ decoder layers has $\sim 2L$ layers of computation. A decoder-only model with $2L$ layers uses similar FLOPs but has $\sim 1.5\times$ the parameters (no cross-attention needed). The T5 paper acknowledged this complexity.
 
-### 5.3 Other Key Findings
+### 4.3 Other Key Findings
 
 1. **More data always helps**: Training on more data (with the same compute budget per example) consistently improved performance.
 2. **Larger models are more sample-efficient**: Larger models extract more learning per training token.
 3. **Multi-task pretraining hurts**: Mixing supervised task data into pretraining (before fine-tuning) didn't help — unsupervised pretraining was sufficient.
 4. **Fine-tuning all parameters works best**: Compared to adapter layers or only fine-tuning the output head, updating all parameters gave the best results.
 
+### 4.4 T5 Architecture Search — Key Findings Table
+
+T5's main contribution was systematic ablations. Summary of key findings:
+
+| What was tested | Winner | Why it matters |
+|-----------------|--------|----------------|
+| Architecture | Encoder-decoder > decoder-only (for supervised tasks) | But decoder-only won later for generality |
+| Pre-training objective | Span corruption > MLM > CLM | Spans create harder tasks |
+| Scale | More is better | Confirmed scaling laws |
+| Multi-task training | Helps on average, hurts some tasks | Task-specific fine-tuning still best |
+| Vocab size | Larger helps up to ~32K | Diminishing returns beyond |
+
+**T5 family sizes** (for interview memory):
+
+```
+T5-small:    60M params
+T5-base:    220M params
+T5-large:   770M params
+T5-XL:        3B params
+T5-XXL:      11B params
+Flan-T5-XXL: 11B params  (instruction-tuned, much better at following instructions)
+```
+
 ---
 
-## 6. BART — Denoising Sequence-to-Sequence
+## 5. BART — Denoising Sequence-to-Sequence
 
-### 6.1 The Idea
+### 5.1 The Idea
 
 BART (Lewis et al., 2020) generalizes the denoising pretraining idea: corrupt the input with various noise functions, then train the encoder-decoder to reconstruct the original.
 
@@ -364,7 +370,7 @@ $$
 
 Unlike T5 (which only generates the missing spans), BART's decoder reconstructs the **entire original sequence**.
 
-### 6.2 Corruption Strategies
+### 5.2 Corruption Strategies
 
 BART tested five corruption strategies:
 
@@ -376,7 +382,7 @@ BART tested five corruption strategies:
 | **Sentence Permutation** | Shuffle sentence order | "On the mat. The cat sat." |
 | **Document Rotation** | Rotate document to start at a random token | "on the mat. The cat sat" |
 
-### 6.3 BART vs T5: Key Differences
+### 5.3 BART vs T5: Key Differences
 
 | Aspect | T5 | BART |
 |--------|-----|------|
@@ -387,7 +393,7 @@ BART tested five corruption strategies:
 | **Activation** | ReLU | GELU |
 | **Base model** | Custom architecture | Same config as RoBERTa (for fair comparison) |
 
-### 6.4 BART's Best Configuration
+### 5.4 BART's Best Configuration
 
 After testing all corruption strategies, the best combination was:
 
@@ -396,7 +402,7 @@ After testing all corruption strategies, the best combination was:
 
 Text infilling was the single most important corruption — it forces the model to determine both *what* was removed and *how long* the removed span was (since one [MASK] can replace any-length span).
 
-### 6.5 BART for Generation Tasks
+### 5.5 BART for Generation Tasks
 
 BART excels at generation tasks because its decoder is trained to produce fluent, complete text:
 
@@ -406,7 +412,7 @@ BART excels at generation tasks because its decoder is trained to produce fluent
 
 **Abstractive QA**: Given context + question, generate the answer.
 
-### 6.6 BART vs BERT for Understanding Tasks
+### 5.6 BART vs BERT for Understanding Tasks
 
 BART can also be used for understanding tasks:
 
@@ -417,102 +423,9 @@ But BART is generally **not preferred** for understanding tasks — it's more co
 
 ---
 
-## 7. mBART & Multilingual Encoder-Decoders
+## 6. Prefix LM — The Hybrid Approach
 
-### 7.1 mBART (Liu et al., 2020)
-
-**mBART** extends BART to 25 languages by training on multilingual denoised text:
-
-- **Pretraining**: Apply BART's denoising objectives to a concatenation of monolingual corpora in 25 languages
-- **Fine-tuning**: Standard translation pairs (bitext) for each language direction
-
-**Key finding**: Pretraining on multiple languages creates shared cross-lingual representations. Fine-tuning on as little as **10K** sentence pairs produces competitive translation systems — compared to hundreds of millions of pairs typically needed when training from scratch.
-
-### 7.2 mBART-50
-
-Extended to 50 languages. Showed that adding more languages generally helps all languages (positive transfer), though very low-resource languages can be hurt by under-representation (the "curse of multilinguality").
-
-### 7.3 Why Encoder-Decoder for Translation
-
-Translation is a natural fit for encoder-decoder:
-
-1. **Source and target are distinct**: Different languages, different word order, different lengths
-2. **Bidirectional source encoding**: Understanding the full source sentence before generating any translation word is crucial — you often need to see the end of a German sentence to know where to start in English
-3. **Cross-attention alignment**: The decoder's cross-attention naturally learns word-level alignment between source and target
-
-This is why encoder-decoder models dominated machine translation long after decoder-only became dominant in other areas.
-
----
-
-## 8. UL2 — Unifying Pretraining Objectives
-
-### 8.1 The Motivation
-
-Different pretraining objectives have different strengths:
-
-- **CLM** (GPT-style): Best for open-ended generation
-- **MLM** (BERT-style): Best for understanding/classification
-- **Span corruption** (T5-style): Good at both, but not optimal at either
-
-UL2 (Tay et al., 2022) asked: can we get the **best of all worlds** by training on **multiple objectives simultaneously**?
-
-### 8.2 The Mixture of Denoisers (MoD)
-
-UL2 uses three denoising objectives, each with different characteristics:
-
-#### R-Denoiser (Regular denoising)
-
-Standard span corruption like T5:
-- Short spans (mean length 3)
-- Low corruption rate (15%)
-- Good for **understanding** and short-range dependencies
-
-#### S-Denoiser (Sequential denoising)
-
-Causal language modeling (prefix → suffix):
-- Mask the suffix of the input
-- Model generates the continuation
-- Good for **generation** and long-form text
-
-#### X-Denoiser (Extreme denoising)
-
-Aggressive span corruption:
-- Long spans (mean length 12-32)
-- High corruption rate (50%)
-- Forces **long-range reasoning** and complex reconstruction
-
-### 8.3 Mode Switching with Sentinel Tokens
-
-UL2 prepends a **mode token** to each training example to tell the model which denoising mode it's in:
-
-```
-R-denoiser: "[R] Thank you <X> me to your party <Y> week."
-S-denoiser: "[S] Thank you for inviting me"   → "to your party last week."
-X-denoiser: "[X] Thank <X> party <Y>."        → "<X> you for inviting me to your <Y> last week"
-```
-
-At inference, the mode token steers the model toward different capabilities:
-- `[R]` for understanding tasks
-- `[S]` for generation tasks
-- `[X]` for tasks requiring strong reasoning
-
-### 8.4 Architecture
-
-UL2 uses a standard encoder-decoder transformer — the innovation is entirely in the **training objective**, not the architecture. This demonstrates that a single architecture can be made to excel at diverse tasks through training design.
-
-### 8.5 Results
-
-UL2 outperformed both T5 (span corruption only) and GPT-style baselines (CLM only) across a broad range of tasks. The key insight: **no single objective is optimal — mixing objectives creates a more versatile model**.
-
-### 8.6 Flan-UL2
-
-Flan-UL2 combines UL2 with **instruction tuning** (Flan) — further improving performance by fine-tuning on a diverse set of instruction-following tasks. This was one of the strongest encoder-decoder models before Flan-T5 XXL.
-
----
-
-## 9. Prefix LM — The Hybrid Approach
-
-### 9.1 The Idea
+### 6.1 The Idea
 
 A Prefix LM uses a single transformer (no separate encoder/decoder), but treats the input differently from the output:
 
@@ -534,13 +447,13 @@ Attention mask for Prefix LM (prefix = 4 tokens, suffix = 3 tokens):
   s3 │  ✓  ✓  ✓  ✓  │  ✓  ✓  ✓
 ```
 
-### 9.2 Advantages
+### 6.2 Advantages
 
 1. **Bidirectional encoding**: Like an encoder-decoder, the prefix tokens get bidirectional context
 2. **Shared parameters**: Unlike encoder-decoder, all layers share the same weights (no separate encoder/decoder parameters). This is more parameter-efficient
 3. **Simpler architecture**: Just one transformer stack with a modified attention mask
 
-### 9.3 Who Uses Prefix LM
+### 6.3 Who Uses Prefix LM
 
 | Model | Type | Notes |
 |-------|------|-------|
@@ -549,7 +462,7 @@ Attention mask for Prefix LM (prefix = 4 tokens, suffix = 3 tokens):
 | U-PaLM | Prefix LM variant | UL2 applied to PaLM |
 | GLM (Tsinghua) | Prefix LM with autoregressive blank infilling | Chinese LLM foundation |
 
-### 9.4 Prefix LM vs Encoder-Decoder vs Decoder-Only
+### 6.4 Prefix LM vs Encoder-Decoder vs Decoder-Only
 
 | Aspect | Encoder-Decoder | Prefix LM | Decoder-Only |
 |--------|----------------|-----------|-------------|
@@ -563,9 +476,9 @@ Attention mask for Prefix LM (prefix = 4 tokens, suffix = 3 tokens):
 
 ---
 
-## 10. Flan-T5 & Instruction-Tuned Encoder-Decoders
+## 7. Flan-T5 & Instruction-Tuned Encoder-Decoders
 
-### 10.1 The Flan Recipe
+### 7.1 The Flan Recipe
 
 **Flan** (Fine-tuned Language Net) is a methodology, not a model. It involves:
 
@@ -573,7 +486,7 @@ Attention mask for Prefix LM (prefix = 4 tokens, suffix = 3 tokens):
 2. Fine-tune it on a massive collection of instruction-following tasks
 3. The resulting model follows instructions much better
 
-### 10.2 Flan-T5
+### 7.2 Flan-T5
 
 Flan-T5 (Chung et al., 2022) applied the Flan recipe to T5:
 
@@ -582,7 +495,7 @@ Flan-T5 (Chung et al., 2022) applied the Flan recipe to T5:
 - **Chain-of-thought**: Some examples include step-by-step reasoning
 - **Sizes**: Flan-T5-Small (80M) to Flan-T5-XXL (11B)
 
-### 10.3 Results
+### 7.3 Results
 
 Flan-T5 dramatically improved T5's zero-shot and few-shot performance:
 
@@ -594,7 +507,7 @@ Flan-T5 dramatically improved T5's zero-shot and few-shot performance:
 
 **Flan-T5-XXL (11B) matched GPT-3 (175B)** on several benchmarks — a 16× parameter efficiency advantage. This showed that instruction tuning is enormously valuable.
 
-### 10.4 Why Instruction Tuning Matters for Encoder-Decoders
+### 7.4 Why Instruction Tuning Matters for Encoder-Decoders
 
 Without instruction tuning, T5 only knows to continue text in the span-corruption style. It doesn't naturally follow instructions like "Summarize this article" or "Translate to French."
 
@@ -607,11 +520,11 @@ This bridges the gap between T5's pretraining (span filling) and real-world usag
 
 ---
 
-## 11. The Great Debate: Why Decoder-Only Won
+## 8. The Great Debate: Why Decoder-Only Won
 
 This section addresses one of the most important questions in modern NLP: why did decoder-only models become the dominant paradigm, despite encoder-decoder models having structural advantages for many tasks?
 
-### 11.1 The Convergence
+### 8.1 The Convergence
 
 ```
 2017-2019: Three paradigms competing
@@ -630,7 +543,7 @@ This section addresses one of the most important questions in modern NLP: why di
 └── Encoder-decoder fading (limited to T5-based systems)
 ```
 
-### 11.2 The Seven Reasons Decoder-Only Won
+### 8.2 The Seven Reasons Decoder-Only Won
 
 #### Reason 1: Simplicity Scales
 
@@ -704,7 +617,7 @@ The most exciting capabilities (reasoning, code generation, creative writing, to
 
 Encoder-decoder models maxed out at T5-11B. By the time researchers might have pushed to 100B+ encoder-decoder, decoder-only was already winning at that scale.
 
-### 11.3 The Counter-Arguments (Why Encoder-Decoder Should Have Won)
+### 8.3 The Counter-Arguments (Why Encoder-Decoder Should Have Won)
 
 1. **Bidirectional encoding is provably stronger**: For understanding the input, bidirectional attention is strictly more powerful than causal attention. A bidirectional encoder can capture relationships that a causal model must infer indirectly.
 
@@ -716,7 +629,7 @@ Encoder-decoder models maxed out at T5-11B. By the time researchers might have p
 
 **Why these arguments lost**: They're all correct in principle, but scale effects dominated. At 175B+ parameters with ICL, the structural advantages of encoder-decoder became marginal while the simplicity advantages of decoder-only became decisive.
 
-### 11.4 The Definitive Comparison
+### 8.4 The Definitive Comparison
 
 | Factor | Encoder-Decoder | Decoder-Only | Winner |
 |--------|----------------|-------------|--------|
@@ -730,13 +643,30 @@ Encoder-decoder models maxed out at T5-11B. By the time researchers might have p
 | Universality | Need to define input/output split | Everything is generation | **Decoder** |
 | Maximum scale achieved | 11B (T5) | 1.8T+ (GPT-4) | **Decoder** |
 
+### 8.5 Encoder-Decoder vs Decoder-Only — When to Use Each
+
+| Criterion | Encoder-Decoder (T5, BART) | Decoder-Only (GPT, Llama) |
+|-----------|---------------------------|---------------------------|
+| Task | Seq2seq: translation, summarization, QA | Open-ended generation, chat |
+| Input-output relationship | Fixed input → variable output | Variable context → continuation |
+| Training efficiency | Two separate stacks → more compute per sample | Simpler architecture |
+| Fine-tuning ease | Works great with labeled (input, output) pairs | Works great with instruction tuning |
+| KV cache at inference | Must store encoder outputs + decoder KV | Just decoder KV |
+| Why decoder-only won | — | Scales better, more flexible, emergent ICL |
+
+**When encoder-decoder still wins**:
+- Machine translation (T5/mT5 competitive with GPT-4 on many language pairs)
+- Structured prediction tasks with strict input→output format
+- Low-resource settings where you have labeled (input, output) pairs
+- Classification/NLU where you fine-tune on small datasets
+
 ---
 
-## 12. When Encoder-Decoder Still Wins
+## 9. When Encoder-Decoder Still Wins
 
 Despite decoder-only dominance, encoder-decoder models remain the best choice for specific scenarios:
 
-### 12.1 Machine Translation (Still)
+### 9.1 Machine Translation (Still)
 
 For dedicated translation systems (not general-purpose LLMs), encoder-decoder is preferred:
 - Bidirectional source encoding is critical for languages with different word orders
@@ -744,28 +674,28 @@ For dedicated translation systems (not general-purpose LLMs), encoder-decoder is
 - Models like NLLB (No Language Left Behind) use encoder-decoder for 200+ languages
 - More efficient: encode source once, generate target
 
-### 12.2 Speech Recognition (Whisper)
+### 9.2 Speech Recognition (Whisper)
 
 OpenAI's Whisper is an encoder-decoder transformer:
 - Encoder: Processes the audio spectrogram bidirectionally
 - Decoder: Generates the text transcript autoregressively
 - Cross-attention creates a natural audio-text alignment
 
-### 12.3 Structured Output Tasks
+### 9.3 Structured Output Tasks
 
 Tasks where the output has a specific structure that differs from the input:
 - **Code compilation**: Source language → target language
 - **Data-to-text**: Structured data → natural language description
 - **SQL generation**: Natural language → SQL query (some systems prefer encoder-decoder)
 
-### 12.4 Low-Resource Efficiency
+### 9.4 Low-Resource Efficiency
 
 For small models (< 1B params), encoder-decoder can be more parameter-efficient:
 - Flan-T5-Small (80M) outperforms decoder-only models of similar size
 - The bidirectional encoder compensates for limited parameter capacity
 - At small scale, the structural advantages outweigh the simplicity advantages
 
-### 12.5 Production Systems with Fixed Structure
+### 9.5 Production Systems with Fixed Structure
 
 When the input-output structure is fixed and well-defined, encoder-decoder's structural match to the task provides engineering benefits:
 - Clear separation of encoding and decoding stages
@@ -774,7 +704,7 @@ When the input-output structure is fixed and well-defined, encoder-decoder's str
 
 ---
 
-## 13. Interview Questions & Answers
+## 10. Interview Questions & Answers
 
 ### Q1: How does T5's span corruption differ from BERT's token masking?
 

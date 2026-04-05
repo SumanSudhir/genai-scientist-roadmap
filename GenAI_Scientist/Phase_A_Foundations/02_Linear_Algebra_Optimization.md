@@ -20,9 +20,8 @@
 7. [Gradient Descent — The Engine of Learning](#7-gradient-descent--the-engine-of-learning)
 8. [Optimizers — From SGD to AdamW](#8-optimizers--from-sgd-to-adamw)
 9. [Learning Rate Schedules](#9-learning-rate-schedules)
-10. [Loss Landscapes, Saddle Points & Training Dynamics](#10-loss-landscapes-saddle-points--training-dynamics)
-11. [Gradient Clipping & Gradient Accumulation](#11-gradient-clipping--gradient-accumulation)
-12. [Interview Questions & Answers](#12-interview-questions--answers)
+10. [Gradient Clipping & Gradient Accumulation](#10-gradient-clipping--gradient-accumulation)
+11. [Interview Questions & Answers](#11-interview-questions--answers)
 
 ---
 
@@ -264,6 +263,28 @@ If the singular values decay rapidly (many small singular values), then a low-ra
 
 **Compression**: Compress weight matrices by keeping only the top singular values. This is the theoretical foundation for why LoRA works.
 
+### 4.5 SVD Numerical Worked Example
+
+Consider a 3×2 weight matrix:
+
+$$A = \begin{bmatrix} 3 & 0 \\ 2 & 2 \\ 0 & 1 \end{bmatrix}$$
+
+After computing SVD (the process involves eigendecomposing $A^TA$), we get approximate singular values $\sigma_1 \approx 3.8$, $\sigma_2 \approx 1.3$.
+
+**Rank-1 approximation** (keep only the largest singular value):
+
+$$A_1 = \sigma_1 \mathbf{u}_1 \mathbf{v}_1^T \approx \begin{bmatrix} 2.9 & 0.5 \\ 2.2 & 1.4 \\ 0.2 & 0.8 \end{bmatrix}$$
+
+```
+Original:  3×2 = 6 numbers
+Rank-1:    3×1 + 1 + 1×2 = 6 numbers (no savings at rank 1!)
+Rank-r for d_model=4096, r=8:
+  Original:  4096×4096 = 16.8M numbers
+  Rank-8:    4096×8 + 8×4096 = 65K numbers  →  256x compression!
+```
+
+**This is exactly LoRA**: instead of fine-tuning the full $W \in \mathbb{R}^{4096 \times 4096}$, LoRA learns $\Delta W = BA$ where $B \in \mathbb{R}^{4096 \times r}$ and $A \in \mathbb{R}^{r \times 4096}$. The hypothesis is that the fine-tuning update $\Delta W$ has low intrinsic rank — which empirically turns out to be true.
+
 ---
 
 ## 5. PCA — Principal Component Analysis
@@ -466,6 +487,35 @@ $$\frac{df}{dx} = \frac{df_3}{df_2} \cdot \frac{df_2}{df_1} \cdot \frac{df_1}{dx
 
 **Memory cost**: We must store all intermediate activations from the forward pass for use in the backward pass. For a transformer with $L$ layers, this means storing $L$ sets of activations of shape $(B, T, d)$. This is a major memory bottleneck and why techniques like gradient checkpointing (recomputing activations instead of storing them) are used.
 
+### 7.6 Gradient Descent Step — Worked Example
+
+Let $f(\theta) = \theta^2 + 2\theta$ (a simple 1D loss). Start at $\theta_0 = 3$, learning rate $\eta = 0.1$.
+
+**Step 1**: Compute gradient: $\nabla f(\theta) = 2\theta + 2$
+At $\theta_0 = 3$: gradient $= 2(3) + 2 = 8$
+
+**Step 2**: Update: $\theta_1 = \theta_0 - \eta \cdot \nabla f = 3 - 0.1 \times 8 = 3 - 0.8 = 2.2$
+
+**Step 3**: Repeat:
+At $\theta_1 = 2.2$: gradient $= 2(2.2) + 2 = 6.4$
+$\theta_2 = 2.2 - 0.1 \times 6.4 = 2.2 - 0.64 = 1.56$
+
+```
+True minimum: f'(θ) = 0 → θ* = -1
+
+Progress:
+  θ₀ = 3.00   loss = 15.0
+  θ₁ = 2.20   loss = 9.24
+  θ₂ = 1.56   loss = 5.60
+  θ₃ = 1.05   loss = 3.16
+  ...
+  θ₂₀ ≈ -0.92  loss ≈ 0.006   (approaching θ* = -1)
+```
+
+Each step reduces the loss. The gradient gets smaller as we approach the minimum (gradient = 0 at optimum), so steps automatically shrink — this is self-regulating for convex functions.
+
+**In practice with LLMs**: Each "step" involves a forward pass over millions of tokens, backward pass computing gradients for billions of parameters, then this same update rule applied simultaneously to every parameter.
+
 ---
 
 ## 8. Optimizers — From SGD to AdamW
@@ -488,31 +538,35 @@ $$v_t = \beta v_{t-1} + \nabla \mathcal{L}(\theta_t - \eta \beta v_{t-1})$$
 
 This "peeking" ahead gives a more accurate gradient and slightly faster convergence.
 
-### 8.2 AdaGrad (Adaptive Gradient)
+**Why momentum helps — visual intuition:**
 
-Different parameters may need different learning rates. Parameters updated frequently (common features) should have smaller learning rates; parameters updated rarely (rare features) should have larger learning rates.
+```
+Loss landscape (elongated valley — θ₁ axis has steep walls, θ₂ axis is flat):
 
-$$g_t = \nabla \mathcal{L}(\theta_t)$$
+WITHOUT momentum (plain SGD):            WITH momentum:
+  Zigzags across the valley               Smoothly follows the valley floor
 
-$$G_t = G_{t-1} + g_t^2 \quad \text{(accumulate squared gradients, element-wise)}$$
+  θ₂                                      θ₂
+  ↑   ← ↓ ← ↓ ← ↓ ← ↓                   ↑   →→→→→→→→→→
+  |   → ↑ → ↑ → ↑ → ↑                   |   (fast, direct)
+  └───────────────────→ θ₁               └───────────────→ θ₁
+  (slow, oscillating)
 
-$$\theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{G_t} + \epsilon} g_t$$
+Why: SGD gradient in the steep θ₂ direction oscillates left-right and cancels out.
+     SGD gradient in the shallow θ₁ direction is small but consistent.
+     Momentum cancels the oscillations (they sum to ~0) and amplifies the consistent
+     direction (they accumulate). Net effect: moves fast along valley, stable across it.
+```
 
-**Problem**: $G_t$ monotonically increases, so the effective learning rate monotonically decreases. Eventually it becomes infinitesimally small and learning stops entirely. This is catastrophic for long training runs like LLM pretraining.
+This is why momentum is essential for training transformers — the loss landscape has many such "ravines" corresponding to parameters with very different optimal learning rates.
 
-### 8.3 RMSProp (Root Mean Square Propagation)
+### 8.2 AdaGrad & RMSProp (Historical Context)
 
-Fix AdaGrad's problem with an exponentially decaying average of squared gradients:
+**AdaGrad**: Divides learning rate by accumulated sum of squared gradients. Good for sparse data; bad for LLM training — the accumulated sum grows monotonically, eventually making learning rate effectively zero.
 
-$$g_t = \nabla \mathcal{L}(\theta_t)$$
+**RMSProp**: Fixes AdaGrad by using an exponential moving average of squared gradients instead of accumulation. This "forgets" old gradients so the learning rate doesn't decay to zero. Both are superseded by Adam for transformer training.
 
-$$v_t = \beta v_{t-1} + (1 - \beta) g_t^2 \quad \text{(exponential moving average of squared grads)}$$
-
-$$\theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{v_t} + \epsilon} g_t$$
-
-$\beta$ is typically 0.99. The exponential moving average "forgets" old gradients, so the effective learning rate doesn't decay to zero.
-
-### 8.4 Adam (Adaptive Moment Estimation)
+### 8.3 Adam (Adaptive Moment Estimation)
 
 Adam combines momentum (first moment) with RMSProp (second moment):
 
@@ -539,7 +593,7 @@ $$\theta_{t+1} = \theta_t - \frac{\eta \hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}$$
 
 **Why Adam dominates for transformers**: Transformers have complex loss landscapes with varying curvature across parameters (attention heads, FFN layers, layer norm, embeddings all have very different gradient scales). Adam's per-parameter adaptive learning rate handles this naturally. SGD with a single learning rate struggles.
 
-### 8.5 AdamW (Adam with Decoupled Weight Decay)
+### 8.4 AdamW (Adam with Decoupled Weight Decay)
 
 The critical difference between Adam and AdamW, and why it matters.
 
@@ -588,7 +642,7 @@ AdamW with:
   epsilon = 1e-8
 ```
 
-### 8.6 Optimizer Comparison Summary
+### 8.5 Optimizer Comparison Summary
 
 ```
 Optimizer    | Adaptive LR | Momentum | Memory   | Best For
@@ -679,72 +733,9 @@ Phase 2: Cosine decay          (eta_peak -> 0.1*eta_peak over remaining steps)
 
 ---
 
-## 10. Loss Landscapes, Saddle Points & Training Dynamics
+## 10. Gradient Clipping & Gradient Accumulation
 
-### 10.1 The Loss Landscape
-
-The loss function $\mathcal{L}(\theta)$ defines a surface in parameter space. For a model with $N$ parameters, this is an $N$-dimensional surface. For a 7B parameter model, the loss landscape is a surface in 7-billion-dimensional space.
-
-**Key features of deep learning loss landscapes**:
-- Highly non-convex (many local minima)
-- High-dimensional (billions of dimensions)
-- Connected low-loss regions (mode connectivity)
-- Sharp vs flat minima
-
-### 10.2 Convexity
-
-**Convex function**: Any line segment between two points on the graph lies above the graph. Formally: $f(\lambda x + (1-\lambda)y) \leq \lambda f(x) + (1-\lambda)f(y)$ for $\lambda \in [0,1]$.
-
-**Properties of convex optimization**:
-- Every local minimum is a global minimum
-- Gradient descent converges to the global minimum
-- Linear regression, logistic regression have convex losses
-
-**Deep learning losses are NOT convex**. But interesting things happen in high dimensions.
-
-### 10.3 Saddle Points
-
-In high dimensions, saddle points are far more common than local minima.
-
-**Why**: At a critical point (gradient = 0), each of the $N$ dimensions of the Hessian contributes either a positive eigenvalue (curving up = local min direction) or negative eigenvalue (curving down = local max direction). For a true local minimum, ALL $N$ eigenvalues must be positive. The probability of this happening by chance in very high dimensions is vanishingly small.
-
-**Result**: Most critical points in deep learning are saddle points, not local minima. The challenge is not "getting stuck in bad local minima" -- it's navigating through saddle points efficiently.
-
-**SGD noise helps**: The stochastic noise in mini-batch SGD naturally perturbs the model away from saddle points. This is one reason SGD-based optimizers work better than exact gradient methods in deep learning.
-
-### 10.4 Sharp vs Flat Minima
-
-**Observation**: Models that converge to "flat" minima (wide basins in the loss landscape) generalize better than those in "sharp" minima (narrow basins).
-
-**Intuition**: A flat minimum is robust -- small perturbations to the weights don't significantly increase the loss. A sharp minimum is fragile -- a tiny weight change causes a big loss increase. Since test data differs from training data, we want robustness.
-
-**What promotes flat minima**:
-- Larger batch sizes tend to find sharper minima (one argument for not making batches too large)
-- SGD noise pushes toward flat regions (the noise scale is larger in sharper regions, creating an implicit bias)
-- Weight decay / L2 regularization biases toward simpler solutions
-- Learning rate warmup avoids sharp, pathological regions early in training
-
-### 10.5 The Hessian
-
-The Hessian $H$ is the matrix of second derivatives:
-
-$$H_{ij} = \frac{\partial^2 \mathcal{L}}{\partial \theta_i \partial \theta_j}$$
-
-**What it tells us**:
-- Eigenvalues of $H$ give the curvature along each eigenvector direction
-- Large positive eigenvalue = steep curvature (need small learning rate in this direction)
-- Near-zero eigenvalue = flat direction (can take large steps)
-- Negative eigenvalue = saddle point direction
-
-**For deep learning**: The Hessian is $N \times N$ (billions x billions), so we never compute it explicitly. But its spectral properties inform optimizer design:
-- Adam's adaptive learning rates implicitly approximate per-parameter curvature (using the second moment as a diagonal approximation to the Hessian)
-- The maximum eigenvalue of the Hessian determines the maximum stable learning rate: $\eta < 2 / \lambda_{\max}$
-
----
-
-## 11. Gradient Clipping & Gradient Accumulation
-
-### 11.1 Gradient Clipping
+### 10.1 Gradient Clipping
 
 **The problem**: During training, gradients can occasionally spike to very large values (due to bad batches, initialization effects, or loss landscape pathologies). A single large gradient step can destroy hours of training by pushing the model to a terrible part of the loss landscape.
 
@@ -768,7 +759,7 @@ Clips each gradient element independently. Can change the direction of the gradi
 
 **Why it matters**: Without gradient clipping, transformer training is unstable. Attention scores can occasionally produce very large gradients (especially early in training before attention patterns stabilize), and a single unclipped step can cause the loss to spike to infinity (training divergence).
 
-### 11.2 Gradient Accumulation
+### 10.2 Gradient Accumulation
 
 **The problem**: Effective batch sizes for LLMs are often 1M-4M tokens, but GPU memory can only hold a fraction of that per forward/backward pass.
 
@@ -798,7 +789,7 @@ Example:
 
 ---
 
-## 12. Interview Questions & Answers
+## 11. Interview Questions & Answers
 
 ### Q1: Why does Adam work better than SGD for transformers?
 

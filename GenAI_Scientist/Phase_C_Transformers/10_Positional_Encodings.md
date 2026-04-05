@@ -15,13 +15,11 @@
 2. [Sinusoidal Positional Encoding (Original Paper)](#2-sinusoidal-positional-encoding-original-paper)
 3. [Learned Absolute Positional Embeddings](#3-learned-absolute-positional-embeddings)
 4. [Relative Positional Encoding (Shaw et al.)](#4-relative-positional-encoding-shaw-et-al)
-5. [Transformer-XL: Relative Position in Recurrence](#5-transformer-xl-relative-position-in-recurrence)
-6. [Rotary Position Embedding (RoPE)](#6-rotary-position-embedding-rope)
-7. [ALiBi — Attention with Linear Biases](#7-alibi--attention-with-linear-biases)
-8. [Context Length Extension — The Frontier Problem](#8-context-length-extension--the-frontier-problem)
-9. [Comparison of All Methods](#9-comparison-of-all-methods)
-10. [Positional Encodings in Vision and Beyond](#10-positional-encodings-in-vision-and-beyond)
-11. [Interview Questions & Answers](#11-interview-questions--answers)
+5. [Rotary Position Embedding (RoPE)](#5-rotary-position-embedding-rope)
+6. [ALiBi — Attention with Linear Biases](#6-alibi--attention-with-linear-biases)
+7. [Context Length Extension — The Frontier Problem](#7-context-length-extension--the-frontier-problem)
+8. [Comparison of All Methods](#8-comparison-of-all-methods)
+9. [Interview Questions & Answers](#9-interview-questions--answers)
 
 ---
 
@@ -169,6 +167,38 @@ This depends only on $pos_1 - pos_2$, not on the absolute positions.
 
 4. **Not used in modern LLMs**: Every major model since GPT-2 has moved to alternative approaches (learned, RoPE, or ALiBi).
 
+### 2.6 Sinusoidal PE — Numerical Example
+
+For d_model = 4 (tiny for illustration), the PE formula is:
+  PE(pos, 2i)   = sin(pos / 10000^(2i/d_model))
+  PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model))
+
+**Position 0** (first token):
+  i=0: PE(0,0) = sin(0/1)    = sin(0) = 0.000
+       PE(0,1) = cos(0/1)    = cos(0) = 1.000
+  i=1: PE(0,2) = sin(0/100)  = sin(0) = 0.000
+       PE(0,3) = cos(0/100)  = cos(0) = 1.000
+  PE(0) = [0.000, 1.000, 0.000, 1.000]
+
+**Position 1** (second token):
+  i=0: PE(1,0) = sin(1/1)    = sin(1) = 0.841
+       PE(1,1) = cos(1/1)    = cos(1) = 0.540
+  i=1: PE(1,2) = sin(1/100)  = sin(0.01) ≈ 0.010
+       PE(1,3) = cos(1/100)  = cos(0.01) ≈ 1.000
+  PE(1) = [0.841, 0.540, 0.010, 1.000]
+
+**Position 5**:
+  i=0: PE(5,0) = sin(5) = -0.959   PE(5,1) = cos(5) = 0.284
+  i=1: PE(5,2) = sin(0.05) ≈ 0.050  PE(5,3) = cos(0.05) ≈ 0.999
+  PE(5) = [-0.959, 0.284, 0.050, 0.999]
+
+**What to notice**:
+- Dimension 0-1 (i=0): Fast oscillation — distinguishes nearby positions
+- Dimension 2-3 (i=1): Slow oscillation — distinguishes distant positions
+- Every position has a unique encoding (like a binary counter but continuous)
+- PE(pos+k) can be expressed as a linear transformation of PE(pos) — this is why
+  attention can learn to attend to "the token 3 positions before me"
+
 ---
 
 ## 3. Learned Absolute Positional Embeddings
@@ -270,50 +300,11 @@ This was the first successful relative position approach. Key insight: **the att
 
 ---
 
-## 5. Transformer-XL: Relative Position in Recurrence
-
-### 5.1 Context
-
-Transformer-XL (Dai et al., 2019) was designed for **very long sequences**. It introduced segment-level recurrence — processing long documents in chunks while carrying hidden states from previous chunks.
-
-This required a rethinking of positional encoding, because the same position index (e.g., position 3) occurs in every chunk.
-
-### 5.2 The Relative Position Decomposition
-
-Transformer-XL decomposes the standard attention score into four terms. Start with the absolute position attention score:
-
-$$
-e_{ij} = (\mathbf{x}_i + \mathbf{p}_i)\mathbf{W}^Q {\mathbf{W}^K}^T (\mathbf{x}_j + \mathbf{p}_j)^T
-$$
-
-Expanding:
-
-$$
-e_{ij} = \underbrace{\mathbf{x}_i \mathbf{W}^Q {\mathbf{W}^K}^T \mathbf{x}_j^T}_{(a) \text{ content→content}} + \underbrace{\mathbf{x}_i \mathbf{W}^Q {\mathbf{W}^K}^T \mathbf{p}_j^T}_{(b) \text{ content→position}} + \underbrace{\mathbf{p}_i \mathbf{W}^Q {\mathbf{W}^K}^T \mathbf{x}_j^T}_{(c) \text{ position→content}} + \underbrace{\mathbf{p}_i \mathbf{W}^Q {\mathbf{W}^K}^T \mathbf{p}_j^T}_{(d) \text{ position→position}}
-$$
-
-Transformer-XL replaces this with a **relative** version:
-
-$$
-e_{ij} = \underbrace{\mathbf{x}_i \mathbf{W}^Q {\mathbf{W}_E^K}^T \mathbf{x}_j^T}_{(a) \text{ content-based addressing}} + \underbrace{\mathbf{x}_i \mathbf{W}^Q {\mathbf{W}_R^K}^T \mathbf{R}_{i-j}^T}_{(b) \text{ content-dependent position bias}} + \underbrace{\mathbf{u} \cdot {\mathbf{W}_E^K}^T \mathbf{x}_j^T}_{(c) \text{ global content bias}} + \underbrace{\mathbf{v} \cdot {\mathbf{W}_R^K}^T \mathbf{R}_{i-j}^T}_{(d) \text{ global position bias}}
-$$
-
-Key changes:
-- **Terms (b) and (d)**: Replace absolute $\mathbf{p}_j$ with relative sinusoidal encoding $\mathbf{R}_{i-j}$
-- **Term (c)**: Replace query-specific $\mathbf{p}_i \mathbf{W}^Q$ with a global learnable bias $\mathbf{u}$ (since the query's absolute position shouldn't matter for content-based attention)
-- **Term (d)**: Similarly replace with global bias $\mathbf{v}$
-
-### 5.3 Legacy
-
-Transformer-XL's decomposition was influential but complex. The key insight — **replace absolute positions with relative offsets in the attention score** — directly inspired RoPE and ALiBi, which achieved the same goal more elegantly.
-
----
-
-## 6. Rotary Position Embedding (RoPE)
+## 5. Rotary Position Embedding (RoPE)
 
 RoPE (Su et al., 2021) is the positional encoding used in virtually every modern LLM: **Llama 1/2/3, Mistral, Mixtral, Qwen, DeepSeek, Gemma, Phi, CodeLlama**. Understanding RoPE deeply is essential.
 
-### 6.1 The Core Idea
+### 5.1 The Core Idea
 
 RoPE encodes position by **rotating** the query and key vectors. The rotation angle depends on the position, so the dot product between a rotated query and a rotated key naturally encodes their **relative position**.
 
@@ -325,7 +316,7 @@ $$
 
 depends only on $n - m$ (the relative position), not on the absolute positions $m$ or $n$.
 
-### 6.2 Mathematical Formulation
+### 5.2 Mathematical Formulation
 
 #### Working in 2D First
 
@@ -367,7 +358,7 @@ $$
 
 This is the same frequency scheme as sinusoidal encodings — a geometric progression from high to low frequency.
 
-### 6.3 Efficient Implementation
+### 5.3 Efficient Implementation
 
 The full rotation matrix is sparse (block-diagonal with 2×2 blocks). In practice, RoPE is computed element-wise without forming the matrix:
 
@@ -387,7 +378,7 @@ where $\text{rotate\_half}$ swaps pairs and negates: $[x_0, x_1, x_2, x_3] \to [
 
 This is a simple, efficient operation — no matrix multiplication needed.
 
-### 6.4 Applied to Attention
+### 5.4 Applied to Attention
 
 RoPE is applied to the queries and keys **after** the linear projections but **before** the dot product:
 
@@ -397,7 +388,7 @@ $$
 
 Note: RoPE is **not** applied to values $\mathbf{V}$. The values carry content information — position should affect *which* tokens we attend to (Q, K), not *what* information we retrieve (V).
 
-### 6.5 Why RoPE Works So Well
+### 5.5 Why RoPE Works So Well
 
 1. **Relative position naturally**: The dot product $\mathbf{q}_m^T \mathbf{k}_n$ depends on $m - n$, not absolute positions. No need for explicit relative position biases.
 
@@ -415,7 +406,7 @@ For large $|m-n|$, the high-frequency terms oscillate rapidly and tend to cancel
 
 5. **No additional parameters**: RoPE is entirely determined by the position and frequency formula. Zero learnable parameters for position encoding.
 
-### 6.6 Visualizing RoPE
+### 5.6 Visualizing RoPE
 
 Think of each 2D dimension pair as a **clock hand**:
 
@@ -437,11 +428,43 @@ Position 0:    Position 1:    Position 2:    Position 5:
 
 Each position corresponds to a unique combination of rotation angles across all dimension pairs. The relative rotation between two positions depends only on their distance.
 
+### 5.7 RoPE — How Rotation Encodes Relative Position
+
+RoPE rotates query and key vectors in 2D planes by an angle proportional to position.
+
+For a 2D slice of the query/key vectors at positions m and n:
+  q_m = R(mθ) · q    (rotate by angle mθ)
+  k_n = R(nθ) · k    (rotate by angle nθ)
+
+The dot product:
+  q_m · k_n = (R(mθ)·q)ᵀ(R(nθ)·k) = qᵀ R((n-m)θ) k
+
+The score depends only on the **relative position (n-m)**, not absolute positions m and n!
+
+Visual:
+```
+  Position 0:  q₀ → (no rotation)
+  Position 1:  q₁ → (rotate by θ₁)
+  Position 2:  q₂ → (rotate by 2θ₁)
+  Position 3:  q₃ → (rotate by 3θ₁)
+
+  dot(q₃, k₁) ∝ angle between them = 2θ₁ = same as dot(q₂, k₀) or dot(q₅, k₃)
+  → only relative distance matters
+```
+
+**Different frequencies for different dimensions** (like sinusoidal PE):
+  Low-frequency pairs: detect long-range relationships
+  High-frequency pairs: detect local adjacency
+
+**Why RoPE generalizes** to longer contexts: You can extend the rotation angles during inference
+to allow longer sequences than seen during training (with some degradation). This is what
+"RoPE scaling" methods (NTK-RoPE, YaRN, etc.) exploit.
+
 ---
 
-## 7. ALiBi — Attention with Linear Biases
+## 6. ALiBi — Attention with Linear Biases
 
-### 7.1 The Idea
+### 6.1 The Idea
 
 ALiBi (Press et al., 2022) takes a radically different approach: instead of encoding position in the input or in Q/K, it adds a **static, linear bias** directly to the attention scores:
 
@@ -453,7 +476,7 @@ where $m$ is a head-specific slope that penalizes attention by distance.
 
 That's it. No positional encodings in the input. No rotation. Just a linear penalty on distance in the attention scores.
 
-### 7.2 The Slopes
+### 6.2 The Slopes
 
 Each attention head gets a different slope $m_h$, forming a geometric sequence:
 
@@ -483,7 +506,7 @@ Head 8 (m=1/256):   Nearly global
 Attention: █████████████████████
 ```
 
-### 7.3 Attention Score Matrix
+### 6.3 Attention Score Matrix
 
 For a 5-token sequence with slope $m$:
 
@@ -493,7 +516,7 @@ $$
 
 (For causal attention, the upper triangle is masked to $-\infty$ anyway.)
 
-### 7.4 Why ALiBi Extrapolates Well
+### 6.4 Why ALiBi Extrapolates Well
 
 ALiBi was designed specifically for **length extrapolation** — performing well on sequences longer than those seen during training.
 
@@ -501,7 +524,7 @@ ALiBi was designed specifically for **length extrapolation** — performing well
 
 The authors showed that models trained with ALiBi on 1024 tokens could perform well on sequences up to 2048+ tokens without any modification — a significant improvement over sinusoidal and learned positional encodings.
 
-### 7.5 Properties
+### 6.5 Properties
 
 | Property | ALiBi |
 |----------|-------|
@@ -511,7 +534,7 @@ The authors showed that models trained with ALiBi on 1024 tokens could perform w
 | Complexity | $O(1)$ per attention entry (just an addition) |
 | Modifies | Attention scores only (not embeddings or Q/K) |
 
-### 7.6 Limitations
+### 6.6 Limitations
 
 1. **Hard linear assumption**: ALiBi assumes attention should decay linearly with distance. This may not always be optimal — some tasks require attending strongly to specific distant positions.
 
@@ -519,7 +542,7 @@ The authors showed that models trained with ALiBi on 1024 tokens could perform w
 
 3. **Performance gap**: At large scale, RoPE-based models (Llama) have generally outperformed ALiBi-based models (BLOOM, MPT), though it's difficult to isolate the positional encoding's contribution from other design choices.
 
-### 7.7 Who Uses ALiBi
+### 6.7 Who Uses ALiBi
 
 | Model | Positional Encoding |
 |-------|-------------------|
@@ -529,13 +552,37 @@ The authors showed that models trained with ALiBi on 1024 tokens could perform w
 
 Most models since 2023 have chosen RoPE over ALiBi.
 
+### 6.8 ALiBi Bias Matrix — Concrete Example
+
+ALiBi adds a fixed linear penalty to attention scores: score(i,j) = qᵢᵀkⱼ/√d - m|i-j|
+
+For 4 tokens (positions 0-3), with head-specific slope m=0.5:
+
+**Penalty matrix** (|i-j| × m):
+```
+         pos 0   pos 1   pos 2   pos 3
+pos 0  [  0.0    -0.5    -1.0    -1.5  ]   Token 0: no penalty to self, -0.5 to neighbor
+pos 1  [ -0.5     0.0    -0.5    -1.0  ]   Token 1: symmetric local bias
+pos 2  [ -1.0    -0.5     0.0    -0.5  ]   Token 2: distant tokens penalized heavily
+pos 3  [ -1.5    -1.0    -0.5     0.0  ]   Token 3: strong recency bias
+```
+
+This is added AFTER computing QKᵀ/√d, BEFORE softmax. The penalty biases each token toward attending to nearby tokens without training any position parameters.
+
+Different attention heads use different slopes m (e.g., {0.25, 0.5, 1.0, 2.0, ...}), allowing
+some heads to attend locally (large m = steep penalty) and others globally (small m = gentle penalty).
+
+**Key advantage**: Since the bias is independent of position value (only depends on relative distance),
+ALiBi naturally generalizes to sequences longer than seen during training — the penalty function
+extends smoothly to new distances without any extrapolation mechanism.
+
 ---
 
-## 8. Context Length Extension — The Frontier Problem
+## 7. Context Length Extension — The Frontier Problem
 
 One of the most active research areas in LLM development: how to make a model work on sequences longer than its training length.
 
-### 8.1 The Problem
+### 7.1 The Problem
 
 A model trained with max length $L_{\text{train}}$ encounters sequences of length $L_{\text{test}} > L_{\text{train}}$. What happens?
 
@@ -547,7 +594,7 @@ A model trained with max length $L_{\text{train}}$ encounters sequences of lengt
 
 **With ALiBi**: Gradual degradation. Works better than others, but still imperfect.
 
-### 8.2 Position Interpolation (PI)
+### 7.2 Position Interpolation (PI)
 
 Chen et al. (2023) proposed a simple idea: instead of **extrapolating** RoPE to new positions, **interpolate** by scaling down the position indices:
 
@@ -572,7 +619,7 @@ PI for L=16384:        |──────────────────�
                        → Local resolution reduced by 4×
 ```
 
-### 8.3 NTK-Aware Interpolation
+### 7.3 NTK-Aware Interpolation
 
 NTK-aware scaling (Reddit user "bloc97", 2023) addresses PI's weakness by scaling frequencies **non-uniformly**:
 
@@ -600,7 +647,7 @@ NTK-aware:     Preserve ────────────── Compress
                (local OK)              (global OK)
 ```
 
-### 8.4 YaRN (Yet another RoPE extensioN)
+### 7.4 YaRN (Yet another RoPE extensioN)
 
 YaRN (Peng et al., 2023) combines NTK-aware interpolation with a **temperature correction**:
 
@@ -620,7 +667,7 @@ The boundary between groups is determined by the **wavelength** relative to the 
 - If wavelength $\lambda < L_{\text{train}}$: The model has seen full cycles → extrapolation is safe
 - If wavelength $\lambda > L_{\text{train}}$: The model hasn't seen full cycles → must interpolate
 
-### 8.5 Dynamic NTK Scaling
+### 7.5 Dynamic NTK Scaling
 
 Used in practice by many systems (e.g., together.ai, vLLM):
 
@@ -635,7 +682,7 @@ $$
 
 This allows a single model to handle any length without pre-specifying the target length.
 
-### 8.6 How Llama 3 Does It
+### 7.6 How Llama 3 Does It
 
 Llama 3 uses a variant of RoPE scaling with a **modified frequency base**:
 
@@ -644,7 +691,7 @@ Llama 3 uses a variant of RoPE scaling with a **modified frequency base**:
 
 The larger base frequency means lower-frequency rotation rates across all dimensions, naturally supporting longer sequences. Combined with continued pretraining on long documents, Llama 3 achieves robust 128K context.
 
-### 8.7 Summary: Context Extension Methods
+### 7.7 Summary: Context Extension Methods
 
 | Method | Approach | Fine-tuning needed? | Local resolution | Long-range |
 |--------|----------|---------------------|-----------------|------------|
@@ -656,9 +703,9 @@ The larger base frequency means lower-frequency rotation rates across all dimens
 
 ---
 
-## 9. Comparison of All Methods
+## 8. Comparison of All Methods
 
-### 9.1 Feature Comparison
+### 8.1 Feature Comparison
 
 | Method | Type | Params | Relative Pos | Extrapolation | Used In |
 |--------|------|--------|-------------|---------------|---------|
@@ -670,7 +717,7 @@ The larger base frequency means lower-frequency rotation rates across all dimens
 | **ALiBi** | Attention score bias | 0 | Yes (linear decay) | Good | BLOOM, MPT |
 | **T5 Relative Bias** | Learned attention bias | Small (per head, per bucket) | Yes | Moderate | T5, Flan-T5 |
 
-### 9.2 The Evolution Timeline
+### 8.2 The Evolution Timeline
 
 ```
 2017: Sinusoidal PE (Vaswani et al.)
@@ -701,7 +748,7 @@ The larger base frequency means lower-frequency rotation rates across all dimens
        └─ Native long context through scaling + continued pretraining
 ```
 
-### 9.3 The Current Winner: RoPE
+### 8.3 The Current Winner: RoPE
 
 RoPE dominates modern LLMs for several reasons:
 
@@ -716,35 +763,7 @@ The main question in 2024-2026 is not *whether* to use RoPE, but *how to extend 
 
 ---
 
-## 10. Positional Encodings in Vision and Beyond
-
-### 10.1 Vision Transformers (ViT)
-
-ViT patches an image into a grid and treats each patch as a "token." Position encodings tell the model where each patch is in the 2D image.
-
-**Approaches**:
-- **Learned 1D** (original ViT): Flatten the 2D grid to 1D and use learned absolute embeddings. Works surprisingly well — the model learns the 2D structure from data.
-- **Learned 2D**: Separate embeddings for row and column positions.
-- **RoPE-2D**: Apply RoPE with 2D rotations (used in some vision-language models).
-
-### 10.2 Audio and Speech
-
-For audio spectrograms (time-frequency representation):
-- Sinusoidal along the time axis
-- Sometimes 2D positional encodings (time + frequency)
-
-### 10.3 Multimodal Models
-
-Models like LLaVA or GPT-4V must handle both text tokens and image patches in the same sequence. Positional encodings must:
-- Give text tokens sequential positions
-- Give image patches 2D spatial positions
-- Allow the model to understand the relationship between text and image positions
-
-Common approach: use the text model's positional encoding (e.g., RoPE) for all tokens, with image patches occupying sequential positions in the text stream.
-
----
-
-## 11. Interview Questions & Answers
+## 9. Interview Questions & Answers
 
 ### Q1: Why can't transformers understand word order without positional encoding?
 
